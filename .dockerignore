@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+demo*
+*.mp4
+*.wav
+*.mp3
+*.ass
+*.egg-info
+dist
+build
