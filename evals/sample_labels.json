@@ -1,0 +1,14 @@
+{
+  "clips": [
+    {
+      "start": 0.0,
+      "end": 25.0,
+      "note": "example: replace with a human-picked moment from your own video"
+    },
+    {
+      "start": 10.0,
+      "end": 30.0,
+      "note": "example: a second moment, ideally non-overlapping"
+    }
+  ]
+}
