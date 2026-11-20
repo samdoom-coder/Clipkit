@@ -1,0 +1,16 @@
+{
+  "name": "seed-demo-30s",
+  "note": "Regression labels for examples/demo.sh. Not a quality benchmark; it only proves the pipeline still finds known moments.",
+  "clips": [
+    {
+      "start": 1.0,
+      "end": 18.0,
+      "note": "hook + first lesson"
+    },
+    {
+      "start": 12.0,
+      "end": 27.0,
+      "note": "product-market-fit payoff"
+    }
+  ]
+}
