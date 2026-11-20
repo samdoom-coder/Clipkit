@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "clipkit": {
+      "command": "clipkit-mcp",
+      "env": {
+        "CLIPKIT_WORKSPACE": "/absolute/path/to/your.clipkit"
+      }
+    }
+  }
+}
