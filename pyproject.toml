@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "clipkit"
+version = "0.4.1"
+description = "Open-source, agent-native clip studio: turn long videos into captioned vertical shorts."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "clipkit contributors" }]
+keywords = ["video", "ai", "mcp", "agent", "shorts", "ffmpeg", "asr"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Video",
+]
+dependencies = [
+  "numpy>=1.24",
+  "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+rumble = ["torch>=2.3", "transformers>=5.0", "accelerate>=0.30", "soundfile>=0.12"]
+whisper = ["faster-whisper>=1.0"]
+faces = ["opencv-python>=4.9"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+clipkit = "clipkit.cli:main"
+clipkit-mcp = "clipkit.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clipkit"]
+include = ["src/clipkit/assets/**"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"SKILL.md" = "clipkit/SKILL.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
