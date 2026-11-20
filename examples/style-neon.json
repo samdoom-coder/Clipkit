@@ -1,0 +1,14 @@
+{
+  "font": "Montserrat ExtraBold",
+  "font_size": 84,
+  "primary": "#FFFFFF",
+  "highlight": "#00FF66",
+  "outline": "#000000",
+  "outline_width": 7,
+  "shadow": 4,
+  "position_y": 1430,
+  "max_words": 3,
+  "max_chars": 20,
+  "uppercase": true,
+  "pop": true
+}
