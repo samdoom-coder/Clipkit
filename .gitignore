@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# clipkit workspaces and media
+.clipkit/
+*.clipkit/
+clips/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.ass
+*.srt
+*.jpg
+*.png
+!docs/**/*.png
+!docs/**/*.jpg
+
+# model caches / local env
+.env
+.env.*
+.DS_Store
