@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import statistics
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -13,6 +14,14 @@ from pydantic import BaseModel, Field
 from clipkit.errors import DependencyError
 from clipkit.media import center_crop_box, probe_media
 from clipkit.util import clamp
+
+# Ignore faces smaller than this fraction of the frame height. On a 1080p
+# stage wide shot the speaker's face is ~15-20% of the height; background
+# audience faces and logo false-positives are usually <5%.
+MIN_FACE_HEIGHT_RATIO = 0.035
+# A merged single-speaker path is only trusted when it covers this fraction of
+# the sampled clip. Otherwise the caller's static crop center is safer.
+MIN_TRACK_COVERAGE = 0.2
 
 
 @dataclass
@@ -76,6 +85,10 @@ class Track:
     @property
     def median_area(self) -> float:
         return statistics.median(box.area for _, box in self.boxes)
+
+    @property
+    def median_height(self) -> float:
+        return statistics.median(box.h for _, box in self.boxes)
 
     @property
     def prominence(self) -> float:
@@ -268,6 +281,14 @@ def _descriptor(frame, box: FaceBox) -> np.ndarray | None:
     return np.concatenate([gray, hue * 0.5]).astype(np.float32)
 
 
+def _plausible_face(box: FaceBox, frame_height: int, min_height_ratio: float) -> bool:
+    """Reject tiny background faces and implausible face-box aspect ratios."""
+    if box.h < max(20.0, frame_height * min_height_ratio):
+        return False
+    aspect = box.w / max(1.0, box.h)
+    return 0.45 <= aspect <= 2.0
+
+
 def sample_faces(
     video: Path,
     *,
@@ -275,39 +296,79 @@ def sample_faces(
     duration: float,
     sample_fps: float = 4.0,
     max_samples: int = 600,
+    min_face_height_ratio: float = MIN_FACE_HEIGHT_RATIO,
+    width: int | None = None,
+    height: int | None = None,
 ) -> list[tuple[float, list[FaceBox]]]:
-    """Sample frames from a clip and detect faces. Times are relative to the clip."""
+    """Sample frames from a clip and detect faces. Times are relative to the clip.
+
+    Frames are decoded in one sequential ffmpeg pass. The old implementation
+    seeked for every sample, which re-decoded the same GOP repeatedly and made
+    cut-heavy clips very slow.
+    """
     try:
-        import cv2
+        import cv2  # noqa: F401 - validate the optional dependency up front
     except ImportError as exc:
         raise DependencyError("face tracking needs opencv — run `uv pip install 'clipkit[faces]'`") from exc
 
     if duration <= 0:
         return []
+    if width is None or height is None:
+        info = probe_media(video)
+        width, height = info.width, info.height
+    if width <= 0 or height <= 0:
+        return []
+
     sample_fps = max(0.5, sample_fps)
     count = min(max_samples, max(2, int(math.ceil(duration * sample_fps))))
     step = duration / count
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        return []
+    effective_fps = count / duration
+    frame_bytes = width * height * 3
+    cmd = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-ss",
+        f"{max(0.0, start):.3f}",
+        "-i",
+        str(video),
+        "-t",
+        f"{duration:.3f}",
+        "-vf",
+        f"fps={effective_fps:.6f},scale={width}:{height}:flags=fast_bilinear",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-",
+    ]
     samples: list[tuple[float, list[FaceBox]]] = []
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
+        assert proc.stdout is not None
         for index in range(count):
-            at = start + (index + 0.5) * step
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, at) * 1000.0)
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                continue
-            # Prefer the decoder's actual timestamp; seeking is approximate on
-            # VFR sources. Fall back to the sampling grid when unavailable.
-            actual = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-            relative = actual - start if actual > 0 else index * step
-            boxes = detect_faces(frame)
+            buffer = proc.stdout.read(frame_bytes)
+            if len(buffer) < frame_bytes:
+                break
+            frame = np.frombuffer(buffer, dtype=np.uint8).reshape((height, width, 3))
+            boxes = [
+                box
+                for box in detect_faces(frame)
+                if _plausible_face(box, height, min_face_height_ratio)
+            ]
             for box in boxes:
                 box.descriptor = _descriptor(frame, box)
-            samples.append((round(max(0.0, relative), 3), boxes))
+            samples.append((round(index * step, 3), boxes))
     finally:
-        cap.release()
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
     return samples
 
 
@@ -570,6 +631,31 @@ def associate_tracks(
     return sorted(tracks, key=lambda track: track.first_t)
 
 
+def merge_tracks(tracks: list[Track], *, duration: float) -> Track:
+    """Merge per-shot face tracks into one largest-face-per-sample path.
+
+    A cut-heavy talk can produce a separate track for every camera angle. Picking
+    one track makes the crop hold a stale position whenever that angle is off
+    screen. Instead, take the largest plausible face at each sampled time so the
+    crop follows the speaker across cuts.
+    """
+    by_time: dict[float, FaceBox] = {}
+    for track in tracks:
+        for at, box in track.boxes:
+            key = round(at, 3)
+            previous = by_time.get(key)
+            if previous is None or box.area > previous.area:
+                by_time[key] = box
+    points = [(at, by_time[at]) for at in sorted(by_time)]
+    if not points:
+        return Track(id=-1)
+    if points[0][0] > 0:
+        points.insert(0, (0.0, points[0][1]))
+    if points[-1][0] < duration:
+        points.append((duration, points[-1][1]))
+    return Track(id=-1, boxes=points)
+
+
 # --------------------------------------------------------------------------- crop plans
 def build_crop_path(
     track: Track,
@@ -644,7 +730,14 @@ def plan_reframe(
     a brief second face (someone walking behind the speaker) does not flip it.
     """
     info = media or probe_media(video)
-    samples = sample_faces(video, start=start, duration=duration, sample_fps=sample_fps)
+    samples = sample_faces(
+        video,
+        start=start,
+        duration=duration,
+        sample_fps=sample_fps,
+        width=info.width,
+        height=info.height,
+    )
     tracks = associate_tracks(
         samples,
         sample_fps=sample_fps,
@@ -669,12 +762,21 @@ def plan_reframe(
     if not tracks:
         return ReframePlan(layout="center", notes=["no faces detected; center crop"])
 
-    eligible = [
+    min_face_height = info.height * MIN_FACE_HEIGHT_RATIO
+    persistent = [
         track
         for track in tracks
+        if track.hits >= 3
+        and track.duration >= 0.5
+        and track.median_height >= min_face_height
+    ]
+    eligible = [
+        track
+        for track in persistent
         if track.hits / total_samples >= 0.25 and track.duration >= min_split_duration
     ]
     eligible.sort(key=lambda track: track.prominence, reverse=True)
+    split_note: str | None = None
 
     if layout in ("auto", "split") and len(eligible) >= 2:
         pair = eligible[:2]
@@ -721,49 +823,47 @@ def plan_reframe(
                     "two-panel split-screen with tracked panels",
                 ],
             )
+        split_note = "multiple faces detected but not enough co-temporal separation for split-screen"
+
+    # Persistence, not split eligibility, is the right pool for a single crop:
+    # a speaker can produce a separate sub-25%-coverage track per camera angle.
+    pool = persistent
+    if not pool:
         return ReframePlan(
-            layout="single",
-            static_center_x=round(eligible[0].median_x(), 2),
-            crop_path=build_crop_path(
-                eligible[0],
-                duration=duration,
-                width=info.width,
-                height=info.height,
-                scene_changes=scene_changes,
-            ),
+            layout="center",
             tracks=summaries,
-            notes=["multiple faces detected but not enough co-temporal separation for split-screen"],
+            notes=["no persistent face track; center crop"],
         )
 
+    merged = merge_tracks(pool, duration=duration)
+    coverage = min(1.0, merged.hits / total_samples)
+    if not merged.boxes or merged.duration < 0.5 or coverage < MIN_TRACK_COVERAGE:
+        return ReframePlan(
+            layout="center",
+            tracks=summaries,
+            notes=[f"low-confidence face track ({coverage:.0%} coverage); center crop"],
+        )
+
+    notes = [f"single tracked path ({coverage:.0%} coverage)"]
+    if split_note:
+        notes.append(split_note)
+    elif len(eligible) > 1:
+        notes.append("multiple faces detected but not enough co-temporal separation for split-screen")
     if layout == "split":
-        dominant = eligible[0] if eligible else tracks[0]
-        return ReframePlan(
-            layout="single",
-            static_center_x=round(dominant.median_x(), 2),
-            crop_path=build_crop_path(
-                dominant,
-                duration=duration,
-                width=info.width,
-                height=info.height,
-                scene_changes=scene_changes,
-            ),
-            tracks=summaries,
-            notes=["split requested, but fewer than 2 persistent faces; single crop"],
-        )
+        notes.append("split requested; using a single merged face path")
 
-    dominant = max(tracks, key=lambda track: track.prominence)
     return ReframePlan(
         layout="single",
-        static_center_x=round(dominant.median_x(), 2),
+        static_center_x=round(merged.median_x(), 2),
         crop_path=build_crop_path(
-            dominant,
+            merged,
             duration=duration,
             width=info.width,
             height=info.height,
             scene_changes=scene_changes,
         ),
         tracks=summaries,
-        notes=["1 dominant face track"],
+        notes=notes,
     )
 
 
