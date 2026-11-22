@@ -296,9 +296,6 @@ def sample_faces(
     duration: float,
     sample_fps: float = 4.0,
     max_samples: int = 600,
-    min_face_height_ratio: float = MIN_FACE_HEIGHT_RATIO,
-    width: int | None = None,
-    height: int | None = None,
 ) -> list[tuple[float, list[FaceBox]]]:
     """Sample frames from a clip and detect faces. Times are relative to the clip.
 
@@ -347,15 +344,16 @@ def sample_faces(
     try:
         assert proc.stdout is not None
         for index in range(count):
-            buffer = proc.stdout.read(frame_bytes)
-            if len(buffer) < frame_bytes:
-                break
-            frame = np.frombuffer(buffer, dtype=np.uint8).reshape((height, width, 3))
-            boxes = [
-                box
-                for box in detect_faces(frame)
-                if _plausible_face(box, height, min_face_height_ratio)
-            ]
+            at = start + (index + 0.5) * step
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, at) * 1000.0)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            # Prefer the decoder's actual timestamp; seeking is approximate on
+            # VFR sources. Fall back to the sampling grid when unavailable.
+            actual = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            relative = actual - start if actual > 0 else index * step
+            boxes = detect_faces(frame)
             for box in boxes:
                 box.descriptor = _descriptor(frame, box)
             samples.append((round(index * step, 3), boxes))
