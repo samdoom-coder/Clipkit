@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **URL ingest:** `init` / `auto` accept `--cookies`, `--proxy`, and `--section`
+  (e.g. `*0-1200` for the first 20 minutes); the `clipkit_init` MCP tool passes
+  the same options to yt-dlp.
+- **Cache correctness:** `transcribe --force` now re-extracts audio, and probe /
+  audio stages are keyed by source size + mtime. This fixes a stale truncated
+  audio file when a source is still uploading.
+- **Manual framing:** `--crop-center X` on `render` / `auto` and `crop_center` on
+  the MCP render tool for fixed-camera talks.
+- **Tracking hardening:** ignore faces below 3.5% of frame height, reject
+  implausible face-box aspect ratios, merge per-shot speaker tracks into one
+  largest-face path, and fall back to a static crop when merged coverage is below
+  20%.
+- Added regression tests for URL option passthrough, tiny background faces,
+  merged tracks across scene cuts, and low-confidence fallback. 64 tests pass.
+
 ## 0.4.1 — real-video hardening
 
 - **Blur/split fill fix:** the fill is now heavily blurred and darkened
