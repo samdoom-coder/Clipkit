@@ -212,3 +212,4 @@ class RenderOptions(BaseModel):
     reframe: Literal["center", "face", "track"] = "center"
     reframe_sample_fps: float = 4.0
     min_split_duration: float = 2.0
+    crop_center_x: float | None = None
