@@ -76,11 +76,17 @@ def clipkit_init(
     workspace: str | None = None,
     name: str | None = None,
     force: bool = False,
+    cookies: str | None = None,
+    proxy: str | None = None,
+    section: str | None = None,
 ) -> dict[str, Any]:
     """Create a clipkit workspace for a local video or an http(s) URL.
 
     Use force=true only when the user explicitly wants to reset an existing
-    workspace. Returns the project id, duration, resolution, and stage status.
+    workspace. cookies points at a Netscape cookies.txt for authenticated
+    downloads, proxy is passed to yt-dlp, and section accepts yt-dlp syntax
+    such as "*0-1200" for the first 20 minutes. Returns the project id,
+    duration, resolution, and stage status.
     """
     root = Path(workspace or os.environ.get("CLIPKIT_WORKSPACE") or ".clipkit").expanduser().resolve()
     if (root / PROJECT_FILE).exists():
@@ -103,7 +109,14 @@ def clipkit_init(
                 shutil.rmtree(path)
     if is_url(source):
         root.mkdir(parents=True, exist_ok=True)
-        local = download(source, root, name=name)
+        local = download(
+            source,
+            root,
+            name=name,
+            cookies=cookies,
+            proxy=proxy,
+            section=section,
+        )
     else:
         local = Path(source).expanduser()
     ws = Workspace.create(root, local, name=name)
@@ -242,6 +255,7 @@ def clipkit_render(
     reframe: str = "center",
     reframe_sample_fps: float = 4.0,
     min_split_duration: float = 2.0,
+    crop_center: float | None = None,
     style: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -252,7 +266,8 @@ def clipkit_render(
     layout: crop | blur | split | auto. `auto` uses split-screen when two
     persistent, separated faces are detected.
     reframe: center | face | track. `track` follows the dominant face with a
-    smoothed crop path; `face` uses a static median face crop.
+    smoothed crop path; `face` uses a static median face crop. crop_center
+    overrides the static crop center with a source x-coordinate in pixels.
     style may point to a caption-style JSON file.
     """
     ws = _ws(workspace)
@@ -277,6 +292,7 @@ def clipkit_render(
             reframe=reframe,
             reframe_sample_fps=reframe_sample_fps,
             min_split_duration=min_split_duration,
+            crop_center_x=crop_center,
         ),
         style=caption_style,
         force=force,
