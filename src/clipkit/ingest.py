@@ -43,16 +43,14 @@ def assert_public_url(url: str) -> None:
             raise ClipkitError(f"refusing to download from a private address: {address}")
 
 
-def download(url: str, directory: Path, *, name: str | None = None) -> Path:
-    assert_public_url(url)
-    if shutil.which("yt-dlp") is None:
-        raise DependencyError(
-            "downloading URLs needs yt-dlp — install it with `uv pip install yt-dlp` "
-            "or download the file yourself and pass a local path"
-        )
-    directory.mkdir(parents=True, exist_ok=True)
-    stem = slugify(name or "source", max_len=40)
-    template = str(directory / f"{stem}.%(ext)s")
+def _download_command(
+    url: str,
+    template: str,
+    *,
+    cookies: str | None = None,
+    proxy: str | None = None,
+    section: str | None = None,
+) -> list[str]:
     cmd = [
         "yt-dlp",
         "--no-playlist",
@@ -63,10 +61,46 @@ def download(url: str, directory: Path, *, name: str | None = None) -> Path:
         "bv*+ba/b",
         "--merge-output-format",
         "mp4",
-        "-o",
-        template,
-        url,
     ]
+    if cookies:
+        cookie_path = Path(cookies).expanduser()
+        if not cookie_path.is_file():
+            raise ClipkitError(f"cookies file not found: {cookie_path}")
+        cmd += ["--cookies", str(cookie_path)]
+    if proxy:
+        cmd += ["--proxy", proxy]
+    if section:
+        cmd += ["--download-sections", section]
+    cmd += ["-o", template, url]
+    return cmd
+
+
+def download(
+    url: str,
+    directory: Path,
+    *,
+    name: str | None = None,
+    cookies: str | None = None,
+    proxy: str | None = None,
+    section: str | None = None,
+) -> Path:
+    """Download a URL with yt-dlp.
+
+    ``cookies`` points at a Netscape-format cookies.txt (needed for sites that
+    require a signed-in session), ``proxy`` is passed through to yt-dlp, and
+    ``section`` accepts yt-dlp syntax such as ``*0-1200`` for the first 20
+    minutes.
+    """
+    assert_public_url(url)
+    if shutil.which("yt-dlp") is None:
+        raise DependencyError(
+            "downloading URLs needs yt-dlp — install it with `uv pip install yt-dlp` "
+            "or download the file yourself and pass a local path"
+        )
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = slugify(name or "source", max_len=40)
+    template = str(directory / f"{stem}.%(ext)s")
+    cmd = _download_command(url, template, cookies=cookies, proxy=proxy, section=section)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
