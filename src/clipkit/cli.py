@@ -65,7 +65,14 @@ def cmd_init(args) -> int:
     if is_url(args.source):
         root.mkdir(parents=True, exist_ok=True)
         print(f"[init] downloading {args.source}", file=sys.stderr)
-        source = download(args.source, root, name=args.name)
+        source = download(
+            args.source,
+            root,
+            name=args.name,
+            cookies=args.cookies,
+            proxy=args.proxy,
+            section=args.section,
+        )
     else:
         source = Path(args.source).expanduser()
 
@@ -197,6 +204,7 @@ def cmd_render(args) -> int:
         reframe=args.reframe,
         reframe_sample_fps=args.reframe_fps,
         min_split_duration=args.min_split,
+        crop_center_x=args.crop_center,
         width=args.width,
         height=args.height,
         fps=args.fps,
@@ -224,7 +232,14 @@ def cmd_auto(args) -> int:
         if not (root / PROJECT_FILE).exists():
             if is_url(args.source):
                 root.mkdir(parents=True, exist_ok=True)
-                source = download(args.source, root, name=args.name)
+                source = download(
+                    args.source,
+                    root,
+                    name=args.name,
+                    cookies=args.cookies,
+                    proxy=args.proxy,
+                    section=args.section,
+                )
             else:
                 source = Path(args.source).expanduser()
             Workspace.create(root, source, name=args.name, copy_source=args.copy)
@@ -255,6 +270,7 @@ def cmd_auto(args) -> int:
         reframe=args.reframe,
         reframe_sample_fps=args.reframe_fps,
         min_split_duration=args.min_split,
+        crop_center_x=args.crop_center,
         width=args.width,
         height=args.height,
         fps=args.fps,
@@ -408,6 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source", help="local video path or http(s) URL")
     p.add_argument("--name", help="project name")
     p.add_argument("--copy", action="store_true", help="copy/hardlink the source into the workspace")
+    p.add_argument("--cookies", help="Netscape cookies.txt for authenticated yt-dlp downloads")
+    p.add_argument("--proxy", help="proxy URL passed to yt-dlp")
+    p.add_argument("--section", help="yt-dlp section, e.g. '*0-1200' for the first 20 minutes")
     p.add_argument("--force", action="store_true", help="reset an existing workspace")
     p.set_defaults(func=cmd_init)
 
@@ -449,6 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reframe", default="center", choices=["center", "face", "track"])
     p.add_argument("--reframe-fps", type=float, default=4.0, help="face sampling rate for tracking")
     p.add_argument("--min-split", type=float, default=2.0, help="seconds two faces must persist for split-screen")
+    p.add_argument(
+        "--crop-center",
+        type=float,
+        help="source x-coordinate for a static crop center (pixels; default frame center)",
+    )
     p.add_argument("--no-captions", action="store_true")
     p.add_argument("--no-normalize", action="store_true")
     p.add_argument("--style", help="caption style JSON")
@@ -464,6 +488,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source", nargs="?", help="video path or URL (optional if workspace exists)")
     p.add_argument("--name")
     p.add_argument("--copy", action="store_true")
+    p.add_argument("--cookies", help="Netscape cookies.txt for authenticated yt-dlp downloads")
+    p.add_argument("--proxy", help="proxy URL passed to yt-dlp")
+    p.add_argument("--section", help="yt-dlp section, e.g. '*0-1200' for the first 20 minutes")
     p.add_argument("--backend", default="auto", choices=["auto", "rumble", "whisper", "mock"])
     p.add_argument("--language")
     p.add_argument("--transcript")
@@ -476,6 +503,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reframe", default="center", choices=["center", "face", "track"])
     p.add_argument("--reframe-fps", type=float, default=4.0, help="face sampling rate for tracking")
     p.add_argument("--min-split", type=float, default=2.0, help="seconds two faces must persist for split-screen")
+    p.add_argument(
+        "--crop-center",
+        type=float,
+        help="source x-coordinate for a static crop center (pixels; default frame center)",
+    )
     p.add_argument("--no-captions", action="store_true")
     p.add_argument("--no-normalize", action="store_true")
     p.add_argument("--style")
