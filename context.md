@@ -11,7 +11,7 @@
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 57 tests passing |
+| Status | Working local MVP; 64 tests passing |
 
 ---
 
@@ -78,7 +78,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 57 tests.
+- Dockerfile, Makefile, examples, synthetic demo, 64 tests.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`.
 
@@ -104,7 +104,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 57 pass
+python -m pytest -q                    # 64 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -199,7 +199,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 57 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 64 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -470,7 +470,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 57 pass
+python -m pytest -q        # 64 pass
 ruff check src tests evals # clean
 ```
 
