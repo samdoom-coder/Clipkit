@@ -6,10 +6,13 @@ import pytest
 from clipkit.models import MediaInfo
 from clipkit.reframe import (
     FaceBox,
+    Track,
+    _plausible_face,
     associate_tracks,
     build_crop_path,
     detect_faces,
     detector_status,
+    merge_tracks,
     plan_reframe,
 )
 from clipkit.reframe import (
@@ -237,3 +240,65 @@ def test_plan_reframe_without_faces_centers(monkeypatch):
         Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
     )
     assert plan.layout == "center"
+
+
+def test_plan_reframe_ignores_tiny_background_faces(monkeypatch):
+    samples = [
+        (i / 4.0, [_box(500, size=160), _box(1500, size=18)]) for i in range(40)
+    ]
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "single"
+    assert plan.static_center_x is not None
+    assert plan.static_center_x < 700
+    assert len(plan.tracks) == 2
+
+
+def test_plan_reframe_merges_speaker_tracks_across_scene_cut(monkeypatch):
+    samples = []
+    for i in range(20):
+        samples.append((i / 4.0, [_box(400, size=160)]))
+    for i in range(20, 40):
+        samples.append((i / 4.0, [_box(1500, size=160)]))
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"),
+        start=0,
+        duration=10,
+        media=_media(),
+        layout="auto",
+        scene_changes=[5.0],
+    )
+    assert plan.layout == "single"
+    assert plan.crop_path[0][1] < 700
+    assert plan.crop_path[-1][1] > 1300
+    jumps = [abs(b[1] - a[1]) for a, b in zip(plan.crop_path, plan.crop_path[1:])]
+    assert max(jumps) > 500
+
+
+def test_plan_reframe_falls_back_to_center_for_fragmented_track(monkeypatch):
+    samples = [(i / 4.0, []) for i in range(40)]
+    for i in range(4):  # only 0.75 s of face at the start
+        samples[i] = (i / 4.0, [_box(500, size=160)])
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "center"
+    assert "low-confidence" in plan.notes[0]
+
+
+def test_plausible_face_rejects_tiny_and_bad_aspect_boxes():
+    assert not _plausible_face(_box(500, size=20), 1080, 0.035)
+    assert _plausible_face(_box(500, size=160), 1080, 0.035)
+    assert not _plausible_face(FaceBox(0, 0, 240, 40), 1080, 0.035)
+
+
+def test_merge_tracks_takes_largest_face_at_each_time():
+    near = Track(id=0, boxes=[(0.0, _box(400, size=100)), (0.25, _box(400, size=100))])
+    far = Track(id=1, boxes=[(0.0, _box(1200, size=200)), (0.25, _box(1200, size=200))])
+    merged = merge_tracks([near, far], duration=0.5)
+    assert merged.hits >= 2
+    assert all(box.cx > 1000 for _, box in merged.boxes)
