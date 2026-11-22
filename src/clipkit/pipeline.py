@@ -26,13 +26,19 @@ def _log(stage: str, fraction: float, message: str) -> None:
     print(f"[{stage}] {fraction * 100:5.1f}%  {message}", file=sys.stderr, flush=True)
 
 
+def _source_signature(path: Path) -> dict[str, int]:
+    stat = path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
 # --------------------------------------------------------------------------- probe
 def ensure_probe(ws: Workspace, *, force: bool = False) -> MediaInfo:
-    if not force and ws.stage_is_valid("probe"):
+    params = _source_signature(ws.source_path)
+    if not force and ws.stage_is_valid("probe", params):
         path = ws.root / "media.json"
         if path.exists():
             return MediaInfo.model_validate(read_json(path))
-    ws.stage_begin("probe")
+    ws.stage_begin("probe", params)
     try:
         info = probe_media(ws.source_path)
         ws.state.duration = info.duration
@@ -51,9 +57,10 @@ def ensure_probe(ws: Workspace, *, force: bool = False) -> MediaInfo:
 # --------------------------------------------------------------------------- audio
 def ensure_audio(ws: Workspace, *, force: bool = False) -> Path:
     destination = ws.root / "audio.wav"
-    if not force and ws.stage_is_valid("audio") and destination.exists():
+    params = _source_signature(ws.source_path)
+    if not force and ws.stage_is_valid("audio", params) and destination.exists():
         return destination
-    ws.stage_begin("audio")
+    ws.stage_begin("audio", params)
     try:
         extract_audio(ws.source_path, destination)
         ws.stage_done("audio", [destination])
@@ -98,7 +105,7 @@ def ensure_transcript(
         ws.state.language = transcript.language
         return transcript
 
-    ensure_audio(ws)
+    ensure_audio(ws, force=force)
     ws.stage_begin("transcribe", params)
     try:
         impl = get_backend(backend, transcript_path=transcript_path, ctc_align=ctc_align)
@@ -239,7 +246,7 @@ def render_candidates(
                     style=style,
                 )
 
-            center_x = None
+            center_x = options.crop_center_x
             panels = None
             panel_paths = None
             crop_path = None
@@ -278,7 +285,7 @@ def render_candidates(
                                 f"'{plan.layout}'; using single crop",
                                 file=sys.stderr,
                             )
-                    if options.reframe in ("face", "track"):
+                    if options.reframe in ("face", "track") and plan.static_center_x is not None:
                         center_x = plan.static_center_x
                     if options.reframe == "track" and plan.crop_path:
                         crop_path = plan.crop_path
