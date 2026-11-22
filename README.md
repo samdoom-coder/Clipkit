@@ -99,13 +99,20 @@ clipkit auto interview.mp4 -w demo.clipkit --top 3
   per-frame crop path (sendcmd). `track` follows a moving speaker.
 - `--reframe-fps 4 --min-split 2.0` — control tracking density and the
   hysteresis threshold for split-screen.
+- `--crop-center X` — source x-coordinate for a static crop. Useful for
+  fixed-camera talks and as a safe fallback when tracking confidence is low.
 
 Tracking uses **YuNet** (bundled, MIT) with a Haar fallback, Kalman-predicted
 boxes, and ByteTrack-style high/low-confidence association. A cheap appearance
 descriptor re-identifies a track through short occlusions; scene cuts clear the
-gallery. Split panels are tracked independently with their own `sendcmd` crop
-paths; each panel is a 9:16 crop scaled over a blurred fill. With 3+ persistent
-faces, the top two by prominence (screen time × face size) get the split.
+gallery. Faces smaller than 3.5% of the frame height are ignored, and per-shot
+tracks for one speaker are merged into a single largest-face path so cut-heavy
+stage footage stays on the speaker. If the merged path covers less than 20% of
+the clip, the renderer falls back to a static crop instead of following a
+fragmented track. Split panels are tracked independently with their own
+`sendcmd` crop paths; each panel is a 9:16 crop scaled over a blurred fill. With
+3+ persistent faces, the top two by prominence (screen time × face size) get the
+split.
 
 Every clip writes `clips/clip_001.reframe.json` with the detected tracks, panel
 boxes, crop paths, and layout decision, so reframing is auditable.
@@ -115,6 +122,22 @@ Already have a transcript? Skip ASR:
 ```bash
 clipkit analyze -w demo.clipkit --transcript transcript.json
 ```
+
+### Authenticated or partial URL ingest
+
+Sites that require a signed-in session (YouTube’s datacenter bot checks, private
+feeds) can use a Netscape-format `cookies.txt` or a proxy. Long sources can be
+downloaded partially with yt-dlp section syntax:
+
+```bash
+clipkit init "https://www.youtube.com/watch?v=..." -w demo.clipkit \
+  --cookies cookies.txt --section "*0-1200"   # first 20 minutes
+
+clipkit init "https://example.com/video" -w demo.clipkit \
+  --proxy "http://user:pass@host:port"
+```
+
+The same options are available on `clipkit auto` and the `clipkit_init` MCP tool.
 
 ## Connect your agent
 
@@ -255,7 +278,7 @@ Working v1:
 - [x] 1080×1920 render with loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 56 tests, including an ffmpeg end-to-end test
+- [x] 64 tests, including an ffmpeg end-to-end test
 
 Next:
 
