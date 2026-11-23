@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **Face-tracking hotfix:** a bad merge left the old OpenCV seek loop inside
+  `sample_faces` while the new FFmpeg reader was in place, so `--layout auto`,
+  `--layout split`, `--reframe face`, and `--reframe track` failed at runtime.
+  Restored the single-pass FFmpeg decoder and added a real-video regression test
+  that exercises the sampling path instead of monkeypatching it.
+- **URL ingest:** `init` / `auto` accept `--cookies`, `--proxy`, and `--section`
+  (e.g. `*0-1200` for the first 20 minutes); the `clipkit_init` MCP tool passes
+  the same options to yt-dlp.
+- **Cache correctness:** `transcribe --force` now re-extracts audio, and probe /
+  audio stages are keyed by source size + mtime. This fixes a stale truncated
+  audio file when a source is still uploading.
+- **Manual framing:** `--crop-center X` on `render` / `auto` and `crop_center` on
+  the MCP render tool for fixed-camera talks.
+- **Tracking hardening:** ignore faces below 3.5% of frame height, reject
+  implausible face-box aspect ratios, merge per-shot speaker tracks into one
+  largest-face path, and fall back to a static crop when merged coverage is below
+  20%.
+- **Faster tracking:** face samples are decoded in one sequential ffmpeg pass
+  instead of seeking for every sample. A 60s clip now samples in ~27s on the T4
+  test box, roughly 9× faster than the seek-per-sample path.
+- Added regression tests for URL option passthrough, tiny background faces,
+  merged tracks across scene cuts, low-confidence fallback, and real FFmpeg face
+  sampling. 65 tests pass.
+
 ## 0.4.1 — real-video hardening
 
 - **Blur/split fill fix:** the fill is now heavily blurred and darkened

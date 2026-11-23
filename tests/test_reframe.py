@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +17,7 @@ from clipkit.reframe import (
     detector_status,
     merge_tracks,
     plan_reframe,
+    sample_faces,
 )
 from clipkit.reframe import (
     FaceBox as Box,
@@ -302,3 +306,34 @@ def test_merge_tracks_takes_largest_face_at_each_time():
     merged = merge_tracks([near, far], duration=0.5)
     assert merged.hits >= 2
     assert all(box.cx > 1000 for _, box in merged.boxes)
+
+
+def test_sample_faces_decodes_real_frames(tmp_path):
+    """Guard the real sampling path: unit tests monkeypatch it, so a broken
+    ffmpeg read loop used to pass the whole suite."""
+    pytest.importorskip("cv2")
+    video = tmp_path / "blank.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=gray:s=160x120:d=1",
+            "-pix_fmt",
+            "yuv420p",
+            "-y",
+            str(video),
+        ],
+        check=True,
+    )
+
+    samples = sample_faces(video, start=0, duration=1.0, sample_fps=4.0)
+    assert len(samples) >= 2
+    assert all(0.0 <= at <= 1.0 for at, _ in samples)
+    assert all(boxes == [] for _, boxes in samples)
+
+    plan = plan_reframe(video, start=0, duration=1.0, layout="auto", sample_fps=4.0)
+    assert plan.layout == "center"
