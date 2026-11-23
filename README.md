@@ -1,8 +1,10 @@
 # clipkit
 
+[![tests](https://github.com/samdoom-coder/Clipkit/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/samdoom-coder/Clipkit/actions/workflows/tests.yml)
+
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
-**v0.4.1** — real-video hardening: darker blur/split fills, 1080p ingest notes, and the next-phase plan in [`FUTURE.md`](FUTURE.md).
+**v0.4.2** — face-tracking hotfix: repaired the broken merge, added a real-video sampling test, and added CI.
 
 ```bash
 clipkit init podcast.mp4
@@ -278,7 +280,8 @@ Working v1:
 - [x] 1080×1920 render with loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 64 tests, including an ffmpeg end-to-end test
+- [x] 65 tests, including an ffmpeg end-to-end test
+- [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:
 

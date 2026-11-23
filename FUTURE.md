@@ -1,9 +1,9 @@
 # clipkit — next phase plan (0.5)
 
-**Status:** 0.4.1 is a real-video hardening release. The core pipeline works on a
-real 10-minute, 1080p episode (FO588 / Vinh Giang), but the test exposed four
-product gaps: per-shot layout, split-pair selection, active-speaker choice, and
-overlay handling.
+**Status:** 0.4.2 is a face-tracking hotfix on top of the 0.4.1 real-video
+hardening release. The core pipeline works on a real 10-minute, 1080p episode
+(FO588 / Vinh Giang), but the test exposed four product gaps: per-shot layout,
+split-pair selection, active-speaker choice, and overlay handling.
 
 This file is the working plan for 0.5. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
@@ -228,6 +228,6 @@ reports the yt-dlp version and warns when it is older than the tested build.
 - Split pair selection is Raj + Vinh on the FO588 two-shot; no duplicate tracks.
 - The crop follows the active speaker on ≥90% of speech frames in the test set.
 - Overlay flags are visible in candidates and can be delogoed.
-- 57+ tests pass; `ruff check` is clean.
+- 65+ tests pass; `ruff check` is clean; CI is green.
 - `README.md`, `context.md`, and `FUTURE.md` describe the new behavior and the
   remaining limitations.

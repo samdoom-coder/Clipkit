@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — face-tracking hotfix
 
 - **Face-tracking hotfix:** a bad merge left the old OpenCV seek loop inside
   `sample_faces` while the new FFmpeg reader was in place, so `--layout auto`,
   `--layout split`, `--reframe face`, and `--reframe track` failed at runtime.
   Restored the single-pass FFmpeg decoder and added a real-video regression test
   that exercises the sampling path instead of monkeypatching it.
+- **CI:** added GitHub Actions (`.github/workflows/tests.yml`) to run `ruff` and
+  the full `pytest` suite on every push and pull request. The original merge
+  regression would have failed the lint step.
 - **URL ingest:** `init` / `auto` accept `--cookies`, `--proxy`, and `--section`
   (e.g. `*0-1200` for the first 20 minutes); the `clipkit_init` MCP tool passes
   the same options to yt-dlp.

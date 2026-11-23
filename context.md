@@ -5,13 +5,13 @@
 | | |
 |---|---|
 | Project | `clipkit` — open, agent-native clip studio |
-| Version | `0.4.1` |
-| Baseline commit | latest on `main` (0.4.1 real-video hardening slice) |
+| Version | `0.4.2` |
+| Baseline commit | latest on `main` (0.4.2 face-tracking hotfix) |
 | License | Apache-2.0 |
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 64 tests passing |
+| Status | Working local MVP; 65 tests passing; CI on every push/PR |
 
 ---
 
@@ -78,7 +78,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 64 tests.
+- Dockerfile, Makefile, examples, synthetic demo, 65 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`.
 
@@ -104,7 +104,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 64 pass
+python -m pytest -q                    # 65 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -199,7 +199,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 64 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 65 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -470,7 +470,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 64 pass
+python -m pytest -q        # 65 pass
 ruff check src tests evals # clean
 ```
 
@@ -573,6 +573,12 @@ Real validation performed (not in CI):
     `eq=brightness=-0.35:saturation=0.65` is deliberate. A softer blur leaves a
     recognisable half-face beside the panel; that was the main real-video defect
     fixed in 0.4.1.
+23. **A mocked test is not coverage for the sampling boundary.** Every
+    `plan_reframe` test monkeypatches `sample_faces`; only
+    `test_sample_faces_decodes_real_frames` runs the real FFmpeg pipe. The 0.4.2
+    regression came from a merge that mixed the old OpenCV loop with the new
+    FFmpeg setup; `ruff` caught the undefined names and CI now runs it. If you
+    change the `sample_faces` signature, update `plan_reframe` and that test.
 
 ---
 
