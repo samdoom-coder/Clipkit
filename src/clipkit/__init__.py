@@ -4,7 +4,7 @@ The package is deliberately split into a deterministic media core and a thin
 agent surface (CLI + MCP). The core never calls an LLM: agents bring their own.
 """
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 from clipkit.models import (  # noqa: F401
     Candidate,

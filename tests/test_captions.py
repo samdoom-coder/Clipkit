@@ -62,3 +62,50 @@ def test_bundled_font_is_copied_next_to_the_render(tmp_path):
     assert target.exists()
     assert target.stat().st_size > 100_000
     assert (tmp_path / "OFL.txt").exists()
+
+
+def test_hook_banner_renders_above_the_captions():
+    ass = build_ass(
+        _words(),
+        clip_start=10.0,
+        clip_end=12.0,
+        hook_text="Most founders ignore this",
+    )
+    assert "Style: Hook," in ass
+    assert "Dialogue: 0,0:00:00.00,0:00:02.00,Hook" in ass
+    assert "\\an8\\pos(540,90)" in ass
+    assert "MOST FOUNDERS IGNORE THIS" in ass
+
+
+def test_hook_banner_respects_duration_and_style():
+    style = CaptionStyle(hook_duration=1.25, hook_position_y=110, hook_font_size=48)
+    ass = build_ass(_words(), clip_start=0.0, clip_end=5.0, style=style, hook_text="Watch this")
+    assert "Dialogue: 0,0:00:00.00,0:00:01.25,Hook" in ass
+    assert "\\pos(540,110)" in ass
+    assert ",48," in ass
+
+
+def test_hook_banner_wraps_long_text():
+    style = CaptionStyle(hook_max_chars=18, hook_max_lines=2)
+    hook = "one two three four five six seven eight nine ten eleven twelve"
+    ass = build_ass(_words(), clip_start=0.0, clip_end=5.0, style=style, hook_text=hook)
+    assert "\\N" in ass
+    assert "..." in ass
+
+
+def test_no_hook_style_without_hook_text():
+    ass = build_ass(_words(), clip_start=0.0, clip_end=2.0)
+    assert "Style: Hook," not in ass
+
+
+def test_hook_banner_survives_captions_off():
+    ass = build_ass(
+        _words(),
+        clip_start=0.0,
+        clip_end=2.0,
+        hook_text="Watch this",
+        captions=False,
+    )
+    assert "Style: Hook," in ass
+    assert "Dialogue: 0,0:00:00.00,0:00:02.00,Hook" in ass
+    assert ",Default," not in ass

@@ -1,9 +1,10 @@
 # clipkit — next phase plan (0.5)
 
-**Status:** 0.4.2 is a face-tracking hotfix on top of the 0.4.1 real-video
-hardening release. The core pipeline works on a real 10-minute, 1080p episode
-(FO588 / Vinh Giang), but the test exposed four product gaps: per-shot layout,
-split-pair selection, active-speaker choice, and overlay handling.
+**Status:** 0.4.3 shipped the hook banner, containment-aware candidate dedupe,
+and the inspect/render UX fixes. The 0.5 plan below remains: per-shot layout,
+split-pair selection, active-speaker choice, and overlay handling. 0.4.2 was a
+face-tracking hotfix on top of the 0.4.1 real-video hardening release; the core
+pipeline now has two real-video validations (FO588 podcast and a TEDx talk).
 
 This file is the working plan for 0.5. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
@@ -41,6 +42,14 @@ What broke or looked weak:
    first 10 MB. This is environment work, but it should be documented in ingest.
 7. **Small UX issues.** `clipkit render` silently skips existing clips unless
    `--force`; `clipkit inspect --clip` expects a path, not a clip ID.
+8. **Rank was not a useful signal.** The TEDx talk's top ten candidates spanned
+   77.8–79.3 and five overlapped heavily; `inspect --top` also selects the Nth
+   rendered clip, not the Nth candidate. 0.4.3 addressed the duplicate windows
+   and the inspect/render UX; calibration is still basic.
+
+The 0.4.3 TEDx render added one more lesson: a hook banner is table stakes for
+Shorts/Reels, and it belongs in the caption style (top-of-frame, two lines,
+semi-transparent box) rather than in a separate render pass.
 
 ---
 
@@ -199,9 +208,16 @@ reports the yt-dlp version and warns when it is older than the tested build.
 
 ## 8. UX and developer experience (P2)
 
-- `clipkit render`: print `skipped (exists)` instead of counting skipped clips
-  as rendered; keep `--force`.
-- `clipkit inspect`: accept a clip ID (`clip_017`) or a path.
+Completed in 0.4.3:
+
+- `clipkit render`: prints `skipped N existing clip(s)` with `--force` still
+  available.
+- `clipkit inspect`: accepts a clip ID (`clip_017`) or a path.
+- `clipkit inspect --top`: help states that it selects the Nth rendered clip by
+  id, not the Nth candidate.
+
+Still open:
+
 - `clipkit candidates`: add `--min-duration` / `--max-duration` filters.
 - `clipkit status`: show the source resolution and whether the transcript is CTC
   or estimated.
@@ -228,6 +244,6 @@ reports the yt-dlp version and warns when it is older than the tested build.
 - Split pair selection is Raj + Vinh on the FO588 two-shot; no duplicate tracks.
 - The crop follows the active speaker on ≥90% of speech frames in the test set.
 - Overlay flags are visible in candidates and can be delogoed.
-- 65+ tests pass; `ruff check` is clean; CI is green.
+- 77+ tests pass; `ruff check` is clean; CI is green.
 - `README.md`, `context.md`, and `FUTURE.md` describe the new behavior and the
   remaining limitations.

@@ -30,5 +30,5 @@ PY
 cd "$ROOT"
 clipkit auto "$WORK/source.mp4" -w "$WORK" \
   --transcript "$WORK/transcript.json" \
-  --min-seconds 15 --max-seconds 25 --top 2
+  --min-seconds 15 --max-seconds 25 --top 2 --hook-from-title
 clipkit inspect -w "$WORK" --top 1

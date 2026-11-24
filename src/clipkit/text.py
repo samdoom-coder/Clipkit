@@ -93,6 +93,9 @@ def join_words(words: list[Word]) -> str:
 
 def clean_title_hint(text: str, max_words: int = 12, max_chars: int = 72) -> str:
     text = _FILLER_PREFIX.sub("", text.strip())
+    # ASR often leaves one half of a quotation pair when a clip starts or ends
+    # mid-quote ("...myself?\""); a lone quote reads as a typo in titles/banners.
+    text = text.strip("\"'“”‘’")
     text = re.sub(r"\s+", " ", text).strip(" -–—")
     words = text.split()
     if len(words) > max_words:

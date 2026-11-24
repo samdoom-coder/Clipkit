@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -209,14 +210,23 @@ def cmd_render(args) -> int:
         height=args.height,
         fps=args.fps,
         crf=args.crf,
+        hook_text=args.hook_text,
+        hook_from_title=args.hook_from_title,
     )
     results = render_candidates(ws, selected, options=options, style=style, force=args.force)
     if args.json:
         _print_json([result.model_dump(mode="json") for result in results])
     else:
-        print(f"rendered {len(results)} clip(s) in {ws.clips_dir}")
+        rendered = [result for result in results if not result.skipped]
+        skipped = [result for result in results if result.skipped]
+        if rendered:
+            print(f"rendered {len(rendered)} clip(s) in {ws.clips_dir}")
+        if skipped:
+            print(f"skipped {len(skipped)} existing clip(s) — use --force to re-render")
         for result in results:
-            print(f"  {result.id}  {result.duration:.1f}s  {result.path}")
+            status = "skipped" if result.skipped else f"{result.duration:.1f}s"
+            hook = f"  hook={result.hook_text!r}" if result.hook_text else ""
+            print(f"  {result.id}  {status}  {result.path}{hook}")
     return 0
 
 
@@ -275,11 +285,16 @@ def cmd_auto(args) -> int:
         height=args.height,
         fps=args.fps,
         crf=args.crf,
+        hook_text=args.hook_text,
+        hook_from_title=args.hook_from_title,
     )
     results = render_candidates(ws, candidates[: args.top], options=options, style=style)
-    print(f"\ndone — {len(results)} clip(s) in {ws.clips_dir}")
+    rendered = [result for result in results if not result.skipped]
+    skipped = [result for result in results if result.skipped]
+    print(f"\ndone — {len(rendered)} rendered, {len(skipped)} skipped in {ws.clips_dir}")
     for result in results:
-        print(f"  {result.id}  {result.duration:.1f}s  score={result.score:.1f}  {result.path}")
+        status = "skipped" if result.skipped else f"score={result.score:.1f}"
+        print(f"  {result.id}  {result.duration:.1f}s  {status}  {result.path}")
     return 0
 
 
@@ -325,12 +340,22 @@ def cmd_eval(args) -> int:
 
 
 # --------------------------------------------------------------------------- inspect
+def _resolve_clip_arg(ws, value: str) -> Path:
+    """Accept a clip id (`clip_002`), a workspace-relative path, or an absolute path."""
+    value = value.strip()
+    if re.fullmatch(r"clip_\d{3,}", value):
+        return ws.clips_dir / f"{value}.mp4"
+    clip = Path(value).expanduser()
+    if not clip.is_absolute():
+        candidate = ws.root / clip
+        clip = candidate if candidate.exists() else Path.cwd() / clip
+    return clip
+
+
 def cmd_inspect(args) -> int:
     ws = _workspace(args)
     if args.clip:
-        clip = Path(args.clip).expanduser()
-        if not clip.is_absolute():
-            clip = (ws.root / clip) if (ws.root / clip).exists() else Path.cwd() / clip
+        clip = _resolve_clip_arg(ws, args.clip)
     else:
         clips = list_clips(ws)
         if not clips:
@@ -475,6 +500,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-captions", action="store_true")
     p.add_argument("--no-normalize", action="store_true")
+    p.add_argument("--hook-text", help="hook banner text shown at the top of the clip")
+    p.add_argument(
+        "--hook-from-title",
+        action="store_true",
+        help="use each candidate's title as its hook banner",
+    )
     p.add_argument("--style", help="caption style JSON")
     p.add_argument("--width", type=int, default=1080)
     p.add_argument("--height", type=int, default=1920)
@@ -510,6 +541,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-captions", action="store_true")
     p.add_argument("--no-normalize", action="store_true")
+    p.add_argument("--hook-text", help="hook banner text shown at the top of the clip")
+    p.add_argument(
+        "--hook-from-title",
+        action="store_true",
+        help="use each candidate's title as its hook banner",
+    )
     p.add_argument("--style")
     p.add_argument("--width", type=int, default=1080)
     p.add_argument("--height", type=int, default=1920)
@@ -528,8 +565,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("inspect", parents=[common], help="create a contact sheet for a clip")
-    p.add_argument("--clip")
-    p.add_argument("--top", type=int, default=1)
+    p.add_argument("--clip", help="clip id (clip_002) or path")
+    p.add_argument(
+        "--top",
+        type=int,
+        default=1,
+        help="Nth rendered clip by id when --clip is omitted (default: 1)",
+    )
     p.add_argument("--count", type=int, default=9)
     p.set_defaults(func=cmd_inspect)
 

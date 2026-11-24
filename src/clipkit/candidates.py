@@ -38,6 +38,32 @@ PAYOFF_PHRASES = (
 )
 LAUGHTER = ("haha", "laughs", "laughter", "lol", "funny")
 
+# Warnings are quality signals, so they also nudge the overall score. Without
+# this, the 0.4.x weights produced tightly clustered scores (a 1.5-point spread
+# across the top ten on a real 16-minute talk), which made rank noise rather
+# than a useful editorial signal.
+WARNING_PENALTIES = (
+    ("weak opening line", 4.0),
+    ("may depend on earlier context", 4.0),
+    ("contains a back-reference", 4.0),
+    ("slow pacing", 2.0),
+    ("very fast pacing", 2.0),
+    ("longer than typical Shorts/Reels", 1.0),
+    ("short clip", 1.0),
+)
+
+# Content words used for near-duplicate detection. Keeping function words out
+# makes two windows on the same topic compare as similar even when the phrasing
+# differs.
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do", "for",
+    "from", "had", "has", "have", "he", "her", "him", "his", "how", "i", "if",
+    "in", "is", "it", "its", "just", "me", "my", "not", "of", "on", "or", "our",
+    "she", "so", "that", "the", "their", "them", "then", "there", "these", "they",
+    "this", "to", "was", "we", "were", "what", "when", "where", "which", "who",
+    "why", "will", "with", "you", "your",
+}
+
 
 @dataclass
 class Unit:
@@ -112,7 +138,7 @@ def generate_candidates(
             if candidate is not None:
                 raw.append(candidate)
 
-    selected = _non_max_suppression(raw, iou_threshold=0.55, limit=max(top_n * 3, 30))
+    selected = _non_max_suppression(raw, overlap_threshold=0.55, text_threshold=0.60, limit=max(top_n * 3, 30))
     selected.sort(key=lambda c: c.score, reverse=True)
     selected = selected[:top_n]
     for rank, candidate in enumerate(selected, start=1):
@@ -153,6 +179,7 @@ def _build_candidate(
         + scores["emotion"] * 0.15
     )
     overall += (scores["payoff"] - 50) * 0.15
+    overall -= _warning_penalty(warnings)
     overall = round(clamp(overall, 0.0, 100.0), 1)
 
     first_text = window[0].text
@@ -346,19 +373,60 @@ def _silence_ratio(features: Features, start: float, end: float) -> float:
     return clamp(1.0 - speech / (end - start), 0.0, 1.0)
 
 
-def _iou(left: Candidate, right: Candidate) -> float:
+def _warning_penalty(warnings: list[str]) -> float:
+    penalty = 0.0
+    for warning in warnings:
+        for prefix, value in WARNING_PENALTIES:
+            if warning.startswith(prefix):
+                penalty += value
+                break
+    return penalty
+
+
+def _overlap_over_min(left: Candidate, right: Candidate) -> float:
+    """Intersection over the shorter clip.
+
+    IoU alone lets a short window hide inside a longer one (a 23 s clip inside a
+    43 s clip has IoU 0.53), which is how near-duplicate candidates survived on
+    real footage. Normalising by the shorter duration catches containment.
+    """
     overlap = max(0.0, min(left.end, right.end) - max(left.start, right.start))
-    union = max(left.end, right.end) - min(left.start, right.start)
-    return overlap / union if union > 0 else 0.0
+    shortest = min(left.duration, right.duration)
+    return overlap / shortest if shortest > 0 else 0.0
+
+
+def _content_words(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    return {word for word in words if len(word) > 2 and word not in STOPWORDS}
+
+
+def _content_jaccard(left: Candidate, right: Candidate) -> float:
+    left_words = _content_words(left.text)
+    right_words = _content_words(right.text)
+    if not left_words or not right_words:
+        return 0.0
+    return len(left_words & right_words) / len(left_words | right_words)
 
 
 def _non_max_suppression(
-    candidates: list[Candidate], *, iou_threshold: float, limit: int
+    candidates: list[Candidate],
+    *,
+    overlap_threshold: float,
+    text_threshold: float,
+    limit: int,
 ) -> list[Candidate]:
+    """Greedy selection that suppresses overlapping AND near-duplicate content.
+
+    Temporal overlap alone keeps two windows that say the same thing; text
+    similarity alone keeps different sentences inside one long window. Both
+    checks run together so the ranked list stays diverse and re-rankable.
+    """
     ordered = sorted(candidates, key=lambda c: c.score, reverse=True)
     kept: list[Candidate] = []
     for candidate in ordered:
-        if any(_iou(candidate, other) >= iou_threshold for other in kept):
+        if any(_overlap_over_min(candidate, other) >= overlap_threshold for other in kept):
+            continue
+        if any(_content_jaccard(candidate, other) >= text_threshold for other in kept):
             continue
         kept.append(candidate)
         if len(kept) >= limit:

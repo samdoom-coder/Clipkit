@@ -10,5 +10,15 @@
   "max_words": 3,
   "max_chars": 20,
   "uppercase": true,
-  "pop": true
+  "pop": true,
+  "hook_font_size": 52,
+  "hook_position_y": 90,
+  "hook_primary": "#FFFFFF",
+  "hook_outline": "#000000",
+  "hook_box_alpha": "80",
+  "hook_box_padding": 14,
+  "hook_max_chars": 36,
+  "hook_max_lines": 2,
+  "hook_uppercase": true,
+  "hook_duration": 0
 }

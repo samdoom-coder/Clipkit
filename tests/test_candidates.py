@@ -1,5 +1,13 @@
-from clipkit.candidates import _hook_score, build_units, generate_candidates
-from clipkit.models import Features, FeatureSeries, Segment, Transcript
+from clipkit.candidates import (
+    _content_jaccard,
+    _hook_score,
+    _non_max_suppression,
+    _overlap_over_min,
+    _warning_penalty,
+    build_units,
+    generate_candidates,
+)
+from clipkit.models import Candidate, Features, FeatureSeries, Segment, Transcript
 from clipkit.text import estimate_word_times
 
 
@@ -54,6 +62,8 @@ def test_generate_candidates_returns_scored_non_overlapping_windows():
             overlap = max(0.0, min(left.end, right.end) - max(left.start, right.start))
             union = max(left.end, right.end) - min(left.start, right.start)
             assert overlap / union < 0.56
+            shortest = min(left.duration, right.duration)
+            assert overlap / shortest < 0.56
 
 
 def test_candidates_do_not_bleed_into_neighbouring_sentences():
@@ -69,3 +79,56 @@ def test_strong_hook_scores_higher_than_weak_hook():
     strong = _hook_score("The biggest mistake founders make is ignoring this.", "the biggest mistake founders make is ignoring this.", 40)
     weak = _hook_score("And then we went to the store for a while.", "and then we went to the store for a while.", 40)
     assert strong > weak
+
+
+def _candidate(cid: str, start: float, end: float, text: str, score: float = 80.0) -> Candidate:
+    return Candidate(
+        id=cid,
+        start=start,
+        end=end,
+        duration=end - start,
+        text=text,
+        score=score,
+    )
+
+
+def test_overlap_over_min_catches_containment():
+    outer = _candidate("outer", 0.0, 40.0, "outer")
+    inner = _candidate("inner", 20.0, 40.0, "inner")
+    assert _overlap_over_min(inner, outer) == 1.0
+
+
+def test_nms_suppresses_nested_and_duplicate_text_windows():
+    outer = _candidate("outer", 0.0, 40.0, "the biggest mistake founders make is ignoring the obvious signal", 95)
+    nested = _candidate("nested", 20.0, 40.0, "they chase a new feature instead of talking to users", 90)
+    repeat = _candidate(
+        "repeat",
+        60.0,
+        90.0,
+        "the biggest mistake founders make is ignoring the obvious signal today",
+        85,
+    )
+    other = _candidate("other", 100.0, 130.0, "most teams learn this after burning a year and money", 70)
+    kept = _non_max_suppression(
+        [outer, nested, repeat, other],
+        overlap_threshold=0.55,
+        text_threshold=0.60,
+        limit=10,
+    )
+    ids = {candidate.id for candidate in kept}
+    assert "nested" not in ids
+    assert "repeat" not in ids
+    assert {"outer", "other"} <= ids
+
+
+def test_content_jaccard_ignores_function_words():
+    left = _candidate("a", 0.0, 10.0, "the biggest mistake founders make is ignoring the signal")
+    right = _candidate("b", 10.0, 20.0, "biggest mistake founders make is ignoring signal")
+    assert _content_jaccard(left, right) > 0.8
+
+
+def test_warning_penalties_reduce_the_overall_score():
+    assert _warning_penalty([]) == 0.0
+    assert _warning_penalty(["weak opening line"]) == 4.0
+    assert _warning_penalty(["slow pacing (1.2 words/s)"]) == 2.0
+    assert _warning_penalty(["weak opening line", "may depend on earlier context"]) == 8.0

@@ -44,3 +44,8 @@ def test_clamp_words_clips_edges():
 def test_clean_title_hint_strips_filler():
     assert clean_title_hint("So, the real reason founders fail is this").startswith("the real")
     assert len(clean_title_hint("word " * 40)) <= 72
+
+
+def test_clean_title_hint_strips_orphaned_quotes():
+    assert clean_title_hint('Why do I do this to myself?"') == "Why do I do this to myself?"
+    assert clean_title_hint('"How would a superhero sit?"') == "How would a superhero sit?"

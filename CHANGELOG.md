@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.3 — hook banners, candidate diversity, UX
+
+- **Hook banner:** `render` / `auto` accept `--hook-text "..."` or
+  `--hook-from-title`; the banner sits at the top of the frame, is styled by the
+  new `hook_*` caption-style fields (bold uppercase, semi-transparent box, two
+  lines max), and the MCP `clipkit_render` tool exposes `hook_text` /
+  `hook_from_title`. The banner still renders with `--no-captions`, since it is
+  burned through the ASS track.
+- **Candidate diversity:** selection now suppresses containment duplicates
+  (overlap over the shorter clip) and near-duplicate content (content-word
+  Jaccard), not just low-IoU pairs. Warning flags also apply small score
+  penalties, so the top list is less compressed and rank is more meaningful.
+- **UX:** `clipkit inspect --clip clip_002` accepts a clip id; `render` reports
+  `skipped N existing clip(s)` instead of counting them as rendered; the
+  `inspect --top` help now states that it selects the Nth rendered clip by id.
+  Title hints also strip orphaned quotation marks left by ASR at clip
+  boundaries (a real defect in the TEDx render).
+- Tests: 77 pass (was 65); `ruff` clean.
+
 ## 0.4.2 — face-tracking hotfix
 
 - **Face-tracking hotfix:** a bad merge left the old OpenCV seek loop inside

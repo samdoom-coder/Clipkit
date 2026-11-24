@@ -5,13 +5,13 @@
 | | |
 |---|---|
 | Project | `clipkit` — open, agent-native clip studio |
-| Version | `0.4.2` |
-| Baseline commit | latest on `main` (0.4.2 face-tracking hotfix) |
+| Version | `0.4.3` |
+| Baseline commit | latest on `main` (0.4.3 hook banner + candidate diversity) |
 | License | Apache-2.0 |
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 65 tests passing; CI on every push/PR |
+| Status | Working local MVP; 77 tests passing; CI on every push/PR |
 
 ---
 
@@ -74,11 +74,13 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - `clipkit eval` + `clipkit_eval` MCP tool for precision@k / coverage recall.
 - Seed regression labels in `evals/seed_labels.json`.
 - Loudness normalization (`loudnorm -14 LUFS`) and faststart.
+- Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`).
+- Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 65 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 77 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`.
 
@@ -104,7 +106,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 65 pass
+python -m pytest -q                    # 77 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -190,8 +192,8 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/asr/rumble.py` | Rumble-2-Flash backend + CTC word timing |
 | `src/clipkit/asr/whisper.py` | faster-whisper backend |
 | `src/clipkit/asr/mock.py` | Existing-transcript backend |
-| `src/clipkit/candidates.py` | Window generation, scoring, NMS, boundary snapping |
-| `src/clipkit/captions.py` | ASS builder, caption style, bundled font copy |
+| `src/clipkit/candidates.py` | Window generation, scoring, containment-aware NMS, content diversity |
+| `src/clipkit/captions.py` | ASS builder, caption + hook-banner style, bundled font copy |
 | `src/clipkit/reframe.py` | YuNet/Haar detection, Kalman tracking, crop-path planner, split layout |
 | `src/clipkit/features.py` | RMS/VAD/WPS/scene feature aggregation |
 | `src/clipkit/evaluation.py` | precision@k / coverage-recall metrics |
@@ -199,7 +201,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 65 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 77 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -335,11 +337,15 @@ Fallback: if CTC alignment fails or matches <35% of words, proportional
 - Add 0.12s pre-roll and 0.22s post-roll, clamped so a clip cannot bleed into a
   neighbouring sentence.
 - Score with lexicons, punctuation, WPS, silence ratio, RMS variance, duration.
-- NMS by temporal IoU ≥0.55, keep up to `max(3*top_n, 30)`, return top N.
+- NMS uses intersection over the shorter clip (≥0.55) plus content-word Jaccard
+  (≥0.60), keep up to `max(3*top_n, 30)`, return top N. IoU alone missed short
+  windows nested inside longer ones; the TEDx render exposed that.
 - Titles are hints, not final copy. The agent rewrites them.
 
 Weights are in `_build_candidate`: 0.35 hook + 0.25 standalone + 0.25 pacing +
-0.15 emotion, plus `(payoff-50)*0.15`.
+0.15 emotion, plus `(payoff-50)*0.15`, minus warning penalties (0.4.3). The
+penalties stop a weak-opening / context-dependent window from scoring the same
+as a clean standalone moment.
 
 Hard rejections (in scoring warnings, not automatic removal): weak opening,
 back-references, very slow/fast pacing, >55s, <18s.
@@ -470,7 +476,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 65 pass
+python -m pytest -q        # 77 pass
 ruff check src tests evals # clean
 ```
 
@@ -579,6 +585,11 @@ Real validation performed (not in CI):
     regression came from a merge that mixed the old OpenCV loop with the new
     FFmpeg setup; `ruff` caught the undefined names and CI now runs it. If you
     change the `sample_faces` signature, update `plan_reframe` and that test.
+24. **A 1.5-point score spread is not a ranking.** On the TEDx talk the top ten
+    candidates spanned 77.8–79.3 and five of them overlapped heavily, so the
+    agent had to pick by reading, not by rank. 0.4.3 adds containment-aware NMS,
+    content-word dedupe, and warning penalties. If you touch scoring, re-check
+    the spread on a real transcript; do not tune against the synthetic fixtures.
 
 ---
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -257,6 +258,8 @@ def clipkit_render(
     min_split_duration: float = 2.0,
     crop_center: float | None = None,
     style: str | None = None,
+    hook_text: str | None = None,
+    hook_from_title: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     """Render chosen candidates as 1080x1920 captioned MP4s.
@@ -269,6 +272,8 @@ def clipkit_render(
     smoothed crop path; `face` uses a static median face crop. crop_center
     overrides the static crop center with a source x-coordinate in pixels.
     style may point to a caption-style JSON file.
+    hook_text draws a banner at the top of every clip; hook_from_title uses each
+    candidate's title instead (explicit hook_text wins when both are set).
     """
     ws = _ws(workspace)
     candidates = load_candidates(ws)
@@ -293,6 +298,8 @@ def clipkit_render(
             reframe_sample_fps=reframe_sample_fps,
             min_split_duration=min_split_duration,
             crop_center_x=crop_center,
+            hook_text=hook_text,
+            hook_from_title=hook_from_title,
         ),
         style=caption_style,
         force=force,
@@ -309,15 +316,20 @@ def clipkit_inspect(
 ) -> dict[str, Any]:
     """Create a contact sheet for a rendered clip so the agent can visually review it.
 
-    Pass a clip path or use top=1..N to inspect rendered clips in order.
-    Returns the image path and clip metadata. Open the image with a filesystem
-    or vision tool; do not claim a clip looks good without looking at it.
+    Pass a clip id (`clip_002`), a clip path, or use top=1..N to inspect rendered
+    clips in order. Returns the image path and clip metadata. Open the image with
+    a filesystem or vision tool; do not claim a clip looks good without looking
+    at it.
     """
     ws = _ws(workspace)
     if clip:
-        path = Path(clip).expanduser()
-        if not path.is_absolute():
-            path = ws.root / path
+        value = clip.strip()
+        if re.fullmatch(r"clip_\d{3,}", value):
+            path = ws.clips_dir / f"{value}.mp4"
+        else:
+            path = Path(value).expanduser()
+            if not path.is_absolute():
+                path = ws.root / path
     else:
         clips = sorted(list_clips(ws), key=lambda item: item.id)
         if not clips:

@@ -109,6 +109,8 @@ Options:
   flips to split-screen (hysteresis).
 - `--no-captions` — clean render.
 - `--style style.json` — brand fonts/colors/position.
+- `--hook-text "..."` — banner the same hook at the top of every rendered clip.
+- `--hook-from-title` — use each candidate's title hint as its hook banner.
 - `--top N` — render the top N if you do not pass ids.
 
 Tracking uses YuNet (bundled, MIT) with a Haar fallback, Kalman-predicted
@@ -120,8 +122,11 @@ tells you whether the tracker or the layout decision failed.
 ### 6. Inspect and iterate
 
 ```
-clipkit inspect -w .clipkit --top 1
+clipkit inspect -w .clipkit --clip clip_005
 ```
+
+`--clip` accepts a clip id or a path. Without it, `--top N` selects the Nth
+rendered clip by id (not the Nth candidate).
 
 Open the contact sheet. Check:
 
@@ -199,9 +204,22 @@ Override with a JSON file:
   "max_words": 3,
   "max_chars": 22,
   "uppercase": true,
-  "pop": true
+  "pop": true,
+  "hook_font_size": 52,
+  "hook_position_y": 90,
+  "hook_primary": "#FFFFFF",
+  "hook_outline": "#000000",
+  "hook_box_alpha": "80",
+  "hook_box_padding": 14,
+  "hook_max_chars": 36,
+  "hook_max_lines": 2,
+  "hook_uppercase": true,
+  "hook_duration": 0
 }
 ```
+
+The `hook_*` block styles the optional top banner. Keep it short (one idea,
+under ~38 characters per line) and do not repeat the caption text.
 
 Check `clipkit doctor` for the font. If Montserrat is missing, install it or
 the renderer will substitute a default sans and the look will drift.

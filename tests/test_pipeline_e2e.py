@@ -106,6 +106,33 @@ def test_full_pipeline_with_mock_transcript(tmp_path):
     assert 9 <= output.duration <= 21
     assert output.has_audio
 
+    # A second render without --force must report the existing clip as skipped
+    # instead of counting it as freshly rendered.
+    again = render_candidates(
+        ws,
+        candidates[:1],
+        options=RenderOptions(layout="crop", captions=True, normalize_audio=True),
+        force=False,
+    )
+    assert again[0].skipped is True
+    assert again[0].id == result.id
+
+    # Hook banner text is written to the ASS file and recorded on the clip.
+    hooked = render_candidates(
+        ws,
+        candidates[:1],
+        options=RenderOptions(
+            layout="crop",
+            captions=True,
+            normalize_audio=False,
+            hook_text="Watch this before your next talk",
+        ),
+        force=True,
+    )
+    assert hooked[0].hook_text == "Watch this before your next talk"
+    assert "Style: Hook," in (ws.root / hooked[0].ass_path).read_text(encoding="utf-8")
+    assert "WATCH THIS BEFORE YOUR NEXT TALK" in (ws.root / hooked[0].ass_path).read_text(encoding="utf-8")
+
     # Blur-pad layout must also resolve to 1080x1920 (a mapping bug once
     # silently returned the source resolution).
     blur = render_candidates(

@@ -28,6 +28,18 @@ class CaptionStyle:
     margin_v: int = 60
     canvas_width: int = 1080
     canvas_height: int = 1920
+    # Hook banner (top of frame). Text comes from --hook-text or the candidate
+    # title; styling lives here so a style JSON can brand it.
+    hook_font_size: int = 52
+    hook_position_y: int = 90
+    hook_primary: str = "#FFFFFF"
+    hook_outline: str = "#000000"
+    hook_box_alpha: str = "80"
+    hook_box_padding: int = 14
+    hook_max_chars: int = 36
+    hook_max_lines: int = 2
+    hook_uppercase: bool = True
+    hook_duration: float = 0.0  # 0 = whole clip
 
     @classmethod
     def from_dict(cls, data: dict | None) -> CaptionStyle:
@@ -159,17 +171,65 @@ def _phrase_event_text(phrase: Phrase, active_index: int, style: CaptionStyle, f
     return f"{{\\an2\\pos({style.canvas_width // 2},{style.position_y})\\fs{font_size}}}{body}"
 
 
+def _wrap_hook(text: str, *, max_chars: int, max_lines: int) -> str:
+    """Wrap the banner text without splitting words; ellipsize if it overflows."""
+    words = text.split()
+    lines: list[str] = []
+    while words and len(lines) < max_lines:
+        line = words.pop(0)
+        while words and len(line) + 1 + len(words[0]) <= max_chars:
+            line += " " + words.pop(0)
+        lines.append(line)
+    if words and lines:
+        last = lines[-1]
+        if len(last) + 3 <= max_chars:
+            lines[-1] = last + "..."
+        else:
+            lines[-1] = last[: max_chars - 3].rstrip() + "..."
+    return "\\N".join(lines)
+
+
+def _hook_event(hook_text: str | None, style: CaptionStyle, duration: float) -> tuple[str, str]:
+    """Return (style line, dialogue line) for the hook banner, or (\"\", \"\")."""
+    text = _escape(hook_text or "")
+    if not text:
+        return "", ""
+    text = text.upper() if style.hook_uppercase else text
+    body = _wrap_hook(text, max_chars=style.hook_max_chars, max_lines=style.hook_max_lines)
+    if not body:
+        return "", ""
+    primary = hex_to_ass(style.hook_primary)
+    box = hex_to_ass(style.hook_outline, alpha=style.hook_box_alpha)
+    transparent = hex_to_ass(style.hook_outline, alpha="FF")
+    style_line = (
+        f"Style: Hook,{style.font},{style.hook_font_size},{primary},{primary},{box},{transparent},"
+        f"-1,0,0,0,100,100,0,0,3,{style.hook_box_padding},0,8,"
+        f"{style.margin_h},{style.margin_h},40,1"
+    )
+    duration = min(style.hook_duration, duration) if style.hook_duration > 0 else duration
+    if duration <= 0:
+        return "", ""
+    dialogue = (
+        f"Dialogue: 0,{format_ass_time(0)},{format_ass_time(duration)},Hook,,0,0,0,,"
+        f"{{\\an8\\pos({style.canvas_width // 2},{style.hook_position_y})}}{body}"
+    )
+    return style_line, dialogue
+
+
 def build_ass(
     words: list[Word],
     *,
     clip_start: float,
     clip_end: float,
     style: CaptionStyle | None = None,
+    hook_text: str | None = None,
+    captions: bool = True,
 ) -> str:
     style = style or CaptionStyle()
     primary = hex_to_ass(style.primary)
     outline = hex_to_ass(style.outline)
     back = hex_to_ass(style.outline, alpha="80")
+    hook_style, hook_line = _hook_event(hook_text, style, clip_end - clip_start)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -181,12 +241,19 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{style.font},{style.font_size},{primary},{primary},{outline},{back},-1,0,0,0,100,100,0,0,1,{style.outline_width},{style.shadow},2,{style.margin_h},{style.margin_h},{style.margin_v},1
-
+"""
+    if hook_style:
+        header += hook_style + "\n"
+    header += """
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines: list[str] = []
+    if hook_line:
+        lines.append(hook_line)
+    if not captions:
+        return header + "\n".join(lines) + "\n"
     phrases = group_words(words, clip_start=clip_start, clip_end=clip_end, style=style)
     for phrase in phrases:
         font_size = _fit_size(phrase, style)
@@ -219,6 +286,18 @@ def write_ass(
     clip_start: float,
     clip_end: float,
     style: CaptionStyle | None = None,
+    hook_text: str | None = None,
+    captions: bool = True,
 ) -> Path:
-    atomic_write_text(path, build_ass(words, clip_start=clip_start, clip_end=clip_end, style=style))
+    atomic_write_text(
+        path,
+        build_ass(
+            words,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            style=style,
+            hook_text=hook_text,
+            captions=captions,
+        ),
+    )
     return path

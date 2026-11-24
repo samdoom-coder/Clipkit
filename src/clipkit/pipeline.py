@@ -231,11 +231,17 @@ def render_candidates(
             clip_path = ws.clips_dir / f"{clip_name}.mp4"
             meta_path = ws.clips_dir / f"{clip_name}.json"
             if clip_path.exists() and meta_path.exists() and not force:
-                results.append(ClipResult.model_validate(read_json(meta_path)))
+                existing = ClipResult.model_validate(read_json(meta_path))
+                existing.skipped = True
+                results.append(existing)
                 continue
 
+            hook_text = None
             ass_path: Path | None = None
-            if options.captions:
+            if options.captions or options.hook_text or options.hook_from_title:
+                hook_text = options.hook_text
+                if not hook_text and options.hook_from_title:
+                    hook_text = candidate.title_hint or None
                 ensure_caption_font(ws.clips_dir)
                 ass_path = ws.clips_dir / f"{clip_name}.ass"
                 write_ass(
@@ -244,6 +250,8 @@ def render_candidates(
                     clip_start=candidate.start,
                     clip_end=candidate.end,
                     style=style,
+                    hook_text=hook_text,
+                    captions=options.captions,
                 )
 
             center_x = options.crop_center_x
@@ -328,6 +336,7 @@ def render_candidates(
                 score=candidate.score,
                 layout=render_layout,
                 reframe_plan=str(plan_path.relative_to(ws.root)) if plan_path else None,
+                hook_text=hook_text,
             )
             ws.store(f"clips/{clip_name}.json", result.model_dump(mode="json"))
             results.append(result)

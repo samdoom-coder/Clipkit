@@ -4,7 +4,7 @@
 
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
-**v0.4.2** — face-tracking hotfix: repaired the broken merge, added a real-video sampling test, and added CI.
+**v0.4.3** — hook banners, candidate diversity, and UX fixes.
 
 ```bash
 clipkit init podcast.mp4
@@ -78,9 +78,9 @@ clipkit analyze -w demo.clipkit --min-seconds 20 --max-seconds 60 --top 10
 clipkit candidates -w demo.clipkit --top 10 --json
 
 # 5. render chosen candidates (auto split-screen + tracked crop)
-clipkit render -w demo.clipkit --ids c0000123_0004567 --layout auto --reframe track
+clipkit render -w demo.clipkit --ids c0000123_0004567 --layout auto --reframe track --hook-from-title
 
-# 6. review the contact sheet
+# 6. review the contact sheet (clip ids are printed by render)
 clipkit inspect -w demo.clipkit --top 1
 ```
 
@@ -118,6 +118,38 @@ split.
 
 Every clip writes `clips/clip_001.reframe.json` with the detected tracks, panel
 boxes, crop paths, and layout decision, so reframing is auditable.
+
+### Hook banner
+
+Add a styled banner at the top of the frame:
+
+```bash
+clipkit render -w demo.clipkit --ids c0000123_0004567 --hook-text "Stop winging it"
+clipkit render -w demo.clipkit --top 3 --hook-from-title   # per-candidate title
+```
+
+The banner is also available on `clipkit auto` and the MCP `clipkit_render` tool
+(`hook_text` / `hook_from_title`). It is part of the caption style, so a style
+JSON can brand it:
+
+```json
+{
+  "hook_font_size": 52,
+  "hook_position_y": 90,
+  "hook_primary": "#FFFFFF",
+  "hook_outline": "#000000",
+  "hook_box_alpha": "80",
+  "hook_box_padding": 14,
+  "hook_max_chars": 36,
+  "hook_max_lines": 2,
+  "hook_uppercase": true,
+  "hook_duration": 0
+}
+```
+
+`hook_duration: 0` keeps the banner visible for the whole clip; set a positive
+value (seconds) to fade it out after the hook. The banner also works without
+word captions (`--no-captions --hook-text "Stop winging it"`).
 
 Already have a transcript? Skip ASR:
 
@@ -277,10 +309,12 @@ Working v1:
 - [x] appearance re-ID through short occlusion; 3+ face prominence policy
 - [x] dynamic split panels, face-aware center crop, auditable reframe plans
 - [x] ASS karaoke captions, brand style JSON
+- [x] hook banner (`--hook-text`, `--hook-from-title`, styleable)
+- [x] containment-aware candidate dedupe + content-word diversity
 - [x] 1080×1920 render with loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 65 tests, including an ffmpeg end-to-end test
+- [x] 77 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:
