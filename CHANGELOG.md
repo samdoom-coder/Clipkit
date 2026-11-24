@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 — per-shot layout and two-pass loudness
+
+- **Per-shot layout:** with `--layout auto`, clipkit now plans crop / split /
+  blur independently for every shot and renders one continuous file: render
+  each shot, concatenate, then mux source audio and burn one global ASS track.
+  A clip that cuts between a single and a two-shot no longer holds one layout
+  across the whole clip. `--no-per-shot` restores the old whole-clip decision.
+- **16:9 acceptance test:** a 17.6 s remote-interview composite renders
+  crop → split → crop in one file; the sidecar records each shot's layout and
+  reason.
+- **Two-pass loudnorm:** measure the source segment first, then normalize with
+  the measured values. The ToS validation moved from −17.7 to −14.1/−15.3 LUFS.
+- **Active-speaker safety:** when a shot has multiple separated faces but no
+  split decision, it falls back to blur instead of cropping a possible
+  listener. True active-speaker detection remains future work.
+- **Scene threshold:** lowered from 0.35 to 0.25 because half-frame changes were
+  missed; the threshold is part of the features cache key.
+- Tests: 94 pass (was 84); `ruff` clean.
+
 ## 0.4.5 — split-screen quality on cut-heavy footage
 
 - **Split coverage guard:** a clip only splits when the chosen pair shares the

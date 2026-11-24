@@ -220,3 +220,7 @@ class RenderOptions(BaseModel):
     # Candidate id -> banner text. Per-candidate hooks are how an agent gives
     # each clip its own hook without re-running render once per clip.
     hooks: dict[str, str] = Field(default_factory=dict)
+    # With layout="auto", decide crop/split/blur per shot instead of once per
+    # clip. This is what keeps a cut-heavy clip from holding one layout across
+    # a single and a two-shot.
+    per_shot_layout: bool = True

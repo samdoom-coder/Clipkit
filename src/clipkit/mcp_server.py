@@ -262,6 +262,7 @@ def clipkit_render(
     hook_text: str | None = None,
     hook_from_title: bool = False,
     hooks: dict[str, str] | None = None,
+    per_shot_layout: bool = True,
     force: bool = False,
 ) -> dict[str, Any]:
     """Render chosen candidates as 1080x1920 captioned MP4s.
@@ -278,6 +279,8 @@ def clipkit_render(
     candidate's title instead (explicit hook_text wins when both are set).
     hooks maps candidate ids to per-clip banner text and takes precedence over
     both hook_text and hook_from_title.
+    per_shot_layout (default true) decides crop/split/blur for each shot when
+    layout="auto"; pass false to force one layout for the whole clip.
     """
     ws = _ws(workspace)
     candidates = load_candidates(ws)
@@ -305,6 +308,7 @@ def clipkit_render(
             hook_text=hook_text,
             hook_from_title=hook_from_title,
             hooks=hooks or {},
+            per_shot_layout=per_shot_layout,
         ),
         style=caption_style,
         force=force,

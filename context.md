@@ -5,13 +5,13 @@
 | | |
 |---|---|
 | Project | `clipkit` — open, agent-native clip studio |
-| Version | `0.4.5` |
-| Baseline commit | latest on `main` (0.4.5 split coverage guard) |
+| Version | `0.5.0` |
+| Baseline commit | latest on `main` (0.5.0 per-shot layout) |
 | License | Apache-2.0 |
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 84 tests passing; CI on every push/PR |
+| Status | Working local MVP; 94 tests passing; CI on every push/PR |
 
 ---
 
@@ -73,28 +73,32 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
   panel paths, crop path, layout decision, and notes.
 - `clipkit eval` + `clipkit_eval` MCP tool for precision@k / coverage recall.
 - Seed regression labels in `evals/seed_labels.json`.
-- Loudness normalization (`loudnorm -14 LUFS`) and faststart.
+- Per-shot layout: crop/split/blur decided per shot, rendered as segments,
+  concatenated, then captioned and muxed in one final pass.
+- Two-pass loudness normalization (targets `loudnorm -14 LUFS`) and faststart.
 - Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`
   / `--hooks hooks.json` for a different hook per clip).
 - Split-screen coverage guard (pair co-visible for 70% of the clip) and
-  default-on hard-cut detection.
+  default-on hard-cut detection (threshold 0.25).
 - Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 84 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 94 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`. 0.4.3 added a TEDx talk
-  (single speaker, 16 min), and 0.4.5 added a cut-heavy two-speaker film excerpt
-  (`twoperson.clipkit/VALIDATION.md` outside the repo).
+  (single speaker, 16 min), 0.4.5 added a cut-heavy two-speaker film excerpt
+  (`twoperson.clipkit/VALIDATION.md`), and 0.5.0 added a 16:9
+  crop→split→crop composite (`interview.clipkit`).
 
 ### Deliberately not built yet
 
 - Long-term re-ID / re-entry (the descriptor gallery only covers 5s and clears
   at scene cuts).
 - Manual speaker picker; the 3+ policy is automatic.
-- Speaker diarization (pyannote).
+- Speaker diarization (pyannote) and true active-speaker detection; the
+  current fallback is split or blur whenever multiple separated faces appear.
 - B-roll, emoji, SFX, music ducking.
 - Multi-aspect output (1:1, 4:5, 16:9).
 - Publishing to TikTok/YouTube/Reels.
@@ -111,7 +115,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 84 pass
+python -m pytest -q                    # 94 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -206,7 +210,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 84 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 94 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -375,7 +379,7 @@ back-references, very slow/fast pacing, >55s, <18s.
     returns the source resolution. This bug existed and is tested now.
   - split: two `crop` + `scale=1080:960` panels → `vstack=inputs=2` → `ass`;
     map `[v]`, never `0:v:0`.
-  - optional `loudnorm=I=-14:TP=-1.5:LRA=11`, AAC 128k, faststart.
+  - two-pass `loudnorm` targeting `I=-14:TP=-1.5:LRA=11`, AAC 128k, faststart.
 - A re-render (caption typo) is ~5s for a short clip; no GPU needed.
 
 ### Reframing (0.3)
@@ -481,7 +485,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 84 pass
+python -m pytest -q        # 94 pass
 ruff check src tests evals # clean
 ```
 
@@ -600,8 +604,15 @@ Real validation performed (not in CI):
     two-shot was merged into one identity (false single), while cut-heavy clips
     split on a pair that shared the frame for only 27–32% of the clip, leaving a
     panel on empty background. Hard-cut detection is now default-on, and split
-    requires 70% pair co-visibility. This is a guard, not per-shot layout; do not
-    claim cut-heavy support until `FUTURE.md` §1 lands.
+    requires 70% pair co-visibility.
+26. **Per-shot layout is segment-based, and the boundaries matter.** Each shot
+    is rendered with the existing single/split/blur renderer, concatenated, then
+    re-encoded once to burn captions and mux audio. Do not merge every layout
+    into one filter graph without solving per-shot `sendcmd` first. Keep
+    `MIN_SHOT_SECONDS` at 0.6: a 1 s tail merged into a two-shot diluted pair
+    co-visibility (56%) and turned a valid split into a blur. The scene
+    threshold is 0.25 because 0.35 missed half-frame changes; it is part of the
+    features cache key.
 
 ---
 

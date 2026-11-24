@@ -1,4 +1,16 @@
-from clipkit.media import _blur_filter, _split_filter, _write_crop_commands, center_crop_box
+import shutil
+import subprocess
+
+import pytest
+
+from clipkit.media import (
+    _blur_filter,
+    _split_filter,
+    _write_crop_commands,
+    center_crop_box,
+    loudnorm_filter,
+    measure_loudness,
+)
 
 
 def test_center_crop_box_horizontal():
@@ -53,3 +65,48 @@ def test_crop_commands_are_interpolated_and_monotonic(tmp_path):
     assert x_values == sorted(x_values)
     assert x_values[0] == 96.0  # 400 - 608/2
     assert x_values[-1] == 296.0  # 600 - 608/2
+
+
+def test_loudnorm_filter_uses_two_pass_measurements():
+    measurement = {
+        "input_i": "-26.58",
+        "input_lra": "5.20",
+        "input_tp": "-4.08",
+        "input_thresh": "-36.58",
+        "target_offset": "4.15",
+    }
+    value = loudnorm_filter(measurement)
+    assert "measured_I=-26.58" in value
+    assert "measured_LRA=5.20" in value
+    assert "offset=4.15" in value
+    assert "linear=true" in value
+
+
+def test_loudnorm_filter_falls_back_without_measurements():
+    assert loudnorm_filter(None) == "loudnorm=I=-14.0:TP=-1.5:LRA=11.0"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required")
+def test_measure_loudness_reads_ffmpeg_analysis(tmp_path):
+    tone = tmp_path / "tone.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "3",
+            str(tone),
+        ],
+        check=True,
+    )
+    measurement = measure_loudness(tone, start=0, duration=3)
+    assert measurement is not None
+    assert float(measurement["input_i"]) < 0
+    assert "input_tp" in measurement

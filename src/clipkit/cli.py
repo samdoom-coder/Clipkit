@@ -241,6 +241,7 @@ def cmd_render(args) -> int:
         hook_text=args.hook_text,
         hook_from_title=args.hook_from_title,
         hooks=hooks,
+        per_shot_layout=not args.no_per_shot,
     )
     results = render_candidates(ws, selected, options=options, style=style, force=args.force)
     if args.json:
@@ -319,6 +320,7 @@ def cmd_auto(args) -> int:
         hook_text=args.hook_text,
         hook_from_title=args.hook_from_title,
         hooks=hooks,
+        per_shot_layout=not args.no_per_shot,
     )
     results = render_candidates(ws, candidates[: args.top], options=options, style=style)
     rendered = [result for result in results if not result.skipped]
@@ -547,6 +549,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--hooks",
         help="JSON object mapping candidate ids to per-clip hook text",
     )
+    p.add_argument(
+        "--no-per-shot",
+        action="store_true",
+        help="use one layout for the whole clip instead of deciding per shot",
+    )
     p.add_argument("--style", help="caption style JSON")
     p.add_argument("--width", type=int, default=1080)
     p.add_argument("--height", type=int, default=1920)
@@ -596,6 +603,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--hooks",
         help="JSON object mapping candidate ids to per-clip hook text",
+    )
+    p.add_argument(
+        "--no-per-shot",
+        action="store_true",
+        help="use one layout for the whole clip instead of deciding per shot",
     )
     p.add_argument("--style")
     p.add_argument("--width", type=int, default=1080)

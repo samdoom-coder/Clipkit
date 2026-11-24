@@ -1,10 +1,11 @@
 # clipkit — next phase plan (0.5)
 
-**Status:** 0.4.5 shipped per-clip hooks, a split-screen co-visibility guard, and
-default-on scene detection. The 0.5 plan below remains: per-shot layout,
-split-pair selection, active-speaker choice, and overlay handling. The core
-pipeline now has three real-video validations (FO588 podcast, a TEDx talk, and a
-two-speaker film excerpt).
+**Status:** 0.5.0 shipped per-shot layout, two-pass loudness, per-clip hooks,
+and the split-screen co-visibility guard. Still open from this plan: better
+split-pair selection, true active-speaker detection, soft-cut detection, and
+overlay handling. The core pipeline now has four real-video validations (FO588
+podcast, a TEDx talk, a two-speaker film excerpt, and a 16:9 crop→split→crop
+composite).
 
 This file is the working plan for 0.5. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
@@ -34,7 +35,9 @@ What broke or looked weak:
    of Vinh instead of Raj + Vinh. At 1080p it was better, but the logic is still
    fragile.
 4. **No active-speaker signal.** The crop occasionally lands on the listener for a
-   beat while the other person is speaking.
+   beat while the other person is speaking. 0.5.0 is conservative: a shot with
+   multiple separated faces but no split decision falls back to blur, so the
+   listener-crop failure is gone without true ASD. A real model remains 0.6.
 5. **Baked-in overlays.** “Raj Shamani Shorts” subscribe bars at ~453–457,
    494–498, 533–537s and the sponsor overlay at ~568–570s are part of the source.
 6. **Long-video download is fragile.** Stable `yt-dlp` exposed only 360p; the
@@ -57,18 +60,25 @@ The 0.4.5 two-speaker validation (a cut-heavy film excerpt) added a ninth:
    two-shot was merged into one identity and rendered as a single crop; with
    cuts, cut-heavy clips picked pairs that shared the frame for only 27–32% of
    the clip, so one panel held a stale position and showed empty background.
-   0.4.5 requires 70% pair co-visibility and turns hard-cut detection on by
-   default. That is a guard, not the fix: per-shot layout is still P0.
+   0.4.5 added the 70% pair co-visibility guard and default-on scene detection;
+   0.5.0 adds per-shot layout, so the guard now applies inside each shot.
 
 ---
 
-## 1. Dynamic per-shot layout (P0)
+## 1. Dynamic per-shot layout (shipped in 0.5.0)
 
 **Problem:** one clip can contain single shots and two-shots. A single crop cuts
 the second person out; a single split duplicates the same person during singles;
 a blur keeps everyone but leaves large dark bands.
 
 **Goal:** one render, one output file, layout chosen per shot.
+
+**Shipped approach:** segment-based rather than one filter graph. Each shot is
+rendered with the existing crop/split/blur renderer, the segments are
+concatenated, and one final pass burns the global ASS, muxes source audio, and
+runs two-pass loudnorm. The sidecar is `clips/clip_00N.reframe.json` with
+`layout: "per-shot"` and a `shots` array. The sketch below is retained for the
+remaining work (soft cuts, per-layout captions, a single graph).
 
 ### Implementation sketch
 
@@ -253,6 +263,6 @@ Still open:
 - Split pair selection is Raj + Vinh on the FO588 two-shot; no duplicate tracks.
 - The crop follows the active speaker on ≥90% of speech frames in the test set.
 - Overlay flags are visible in candidates and can be delogoed.
-- 84+ tests pass; `ruff check` is clean; CI is green.
+- 94+ tests pass; `ruff check` is clean; CI is green.
 - `README.md`, `context.md`, and `FUTURE.md` describe the new behavior and the
   remaining limitations.

@@ -442,7 +442,12 @@ def render_clip(
     if has_audio:
         cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000"]
         if normalize_audio:
-            cmd += ["-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
+            cmd += [
+                "-af",
+                loudnorm_filter(
+                    measure_loudness(source, start=start, duration=duration)
+                ),
+            ]
     cmd += ["-movflags", "+faststart", str(destination)]
 
     try:
@@ -469,7 +474,225 @@ def render_clip(
     return destination
 
 
-def detect_scene_changes(source: Path, threshold: float = 0.35, timeout: int = 180) -> list[float]:
+def measure_loudness(
+    source: Path,
+    *,
+    start: float,
+    duration: float,
+    target: float = -14.0,
+    true_peak: float = -1.5,
+    lra: float = 11.0,
+) -> dict | None:
+    """Run the loudnorm analysis pass and return its JSON measurements.
+
+    Single-pass loudnorm routinely misses the target by 1–4 LU on clips with
+    dynamic source audio. The measured values feed a second pass, which lands
+    within a few tenths of a LU. Returns None for silence or failed analysis so
+    callers can fall back to single-pass.
+    """
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostats",
+        "-ss",
+        f"{max(0.0, start):.3f}",
+        "-t",
+        f"{max(0.1, duration):.3f}",
+        "-i",
+        str(source),
+        "-af",
+        f"loudnorm=I={target}:TP={true_peak}:LRA={lra}:print_format=json",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = run(cmd, check=False)
+    except ClipkitError:
+        return None
+    if proc.returncode != 0:
+        return None
+    for raw in reversed(re.findall(r"\{[^{}]*\}", proc.stderr or "")):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if "input_i" not in data:
+            continue
+        try:
+            if float(data["input_i"]) <= -70.0:
+                return None
+        except (TypeError, ValueError):
+            return None
+        return data
+    return None
+
+
+def loudnorm_filter(
+    measurement: dict | None,
+    *,
+    target: float = -14.0,
+    true_peak: float = -1.5,
+    lra: float = 11.0,
+) -> str:
+    base = f"loudnorm=I={target}:TP={true_peak}:LRA={lra}"
+    if not measurement:
+        return base
+    try:
+        measured = {
+            "measured_I": measurement["input_i"],
+            "measured_LRA": measurement["input_lra"],
+            "measured_TP": measurement["input_tp"],
+            "measured_thresh": measurement["input_thresh"],
+            "offset": measurement["target_offset"],
+        }
+    except KeyError:
+        return base
+    extra = ":".join(f"{key}={value}" for key, value in measured.items())
+    return f"{base}:{extra}:linear=true:print_format=summary"
+
+
+def concat_clips(
+    segments: list[Path],
+    destination: Path,
+    *,
+    fps: int = 30,
+    crf: int = 20,
+) -> Path:
+    """Concatenate same-codec video-only segments, re-encoding only if needed."""
+    if not segments:
+        raise ClipkitError("cannot concatenate zero segments")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    list_path = destination.with_suffix(".concat.txt")
+    list_path.write_text(
+        "\n".join(f"file '{segment.resolve()}'" for segment in segments) + "\n",
+        encoding="utf-8",
+    )
+    base = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path),
+        "-an",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+    try:
+        run(base + ["-c:v", "copy", "-movflags", "+faststart", str(destination)])
+    except ClipkitError:
+        run(
+            base
+            + [
+                "-r",
+                str(fps),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                str(crf),
+                "-profile:v",
+                "high",
+                "-movflags",
+                "+faststart",
+                str(destination),
+            ]
+        )
+    return destination
+
+
+def finalize_clip(
+    video: Path,
+    source: Path,
+    destination: Path,
+    *,
+    start: float,
+    duration: float,
+    ass_path: Path | None = None,
+    has_audio: bool = True,
+    normalize_audio: bool = True,
+    fps: int = 30,
+    crf: int = 20,
+) -> Path:
+    """Mux source audio and burn captions onto a pre-rendered video timeline."""
+    require_ffmpeg()
+    video = video.resolve()
+    destination = destination.resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    work_dir = ass_path.parent if ass_path is not None else destination.parent
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(video),
+    ]
+    if has_audio:
+        cmd += [
+            "-ss",
+            f"{max(0.0, start):.3f}",
+            "-t",
+            f"{max(0.1, duration):.3f}",
+            "-i",
+            str(source),
+        ]
+    cmd += ["-map", "0:v:0"]
+    if ass_path is not None:
+        cmd += [
+            "-vf",
+            f"ass=filename={ass_path.name}:fontsdir=.",
+            "-r",
+            str(fps),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            str(crf),
+            "-profile:v",
+            "high",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    else:
+        cmd += ["-c:v", "copy"]
+    if has_audio:
+        cmd += ["-map", "1:a:0?", "-c:a", "aac", "-b:a", "128k", "-ar", "48000"]
+        if normalize_audio:
+            cmd += [
+                "-af",
+                loudnorm_filter(
+                    measure_loudness(source, start=start, duration=duration)
+                ),
+            ]
+    cmd += [
+        "-t",
+        f"{max(0.1, duration):.3f}",
+        "-movflags",
+        "+faststart",
+        str(destination),
+    ]
+    run(cmd, cwd=work_dir)
+    return destination
+
+
+DEFAULT_SCENE_THRESHOLD = 0.25
+
+
+def detect_scene_changes(
+    source: Path, threshold: float = DEFAULT_SCENE_THRESHOLD, timeout: int = 180
+) -> list[float]:
     """Best-effort hard-cut detection using FFmpeg's scene score.
 
     Returns an empty list instead of failing the pipeline: scene cuts improve

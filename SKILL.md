@@ -97,8 +97,9 @@ clipkit render -w .clipkit --ids c0000123_0004567,c0000789_0012345
 Options:
 
 - `--layout crop` (default) — one 9:16 fill crop.
-- `--layout auto` — detect faces and automatically use split-screen when two
-  persistent, horizontally separated speakers are present; otherwise single.
+- `--layout auto` — plan every shot independently: crop for one persistent
+  face, split for two separated co-visible faces, blur for ambiguous multi-face
+  or no reliable face. This is the default recommendation for interviews.
 - `--layout split` — force split-screen if two eligible faces are found.
 - `--layout blur` — keep the full frame and blur-pad the background.
 - `--reframe center|face|track` — center; static median face; or a smoothed
@@ -111,6 +112,8 @@ Options:
   position across cuts.
 - `--no-scenes` — skip hard-cut detection. It runs by default and keeps track
   IDs from leaking across shots; only disable it on very long sources.
+- `--no-per-shot` — use one layout for the whole clip instead of deciding per
+  shot. Per-shot layout is the default with `--layout auto`.
 - `--no-captions` — clean render.
 - `--style style.json` — brand fonts/colors/position.
 - `--hook-text "..."` — banner the same hook at the top of every rendered clip.
@@ -121,9 +124,12 @@ Options:
 
 Tracking uses YuNet (bundled, MIT) with a Haar fallback, Kalman-predicted
 boxes, and ByteTrack-style high/low-confidence association. Split panels are
-tracked independently. Reframing writes `clips/clip_00N.reframe.json` with the
-tracks, panel boxes, crop paths, and notes. Read it when a crop looks wrong; it
-tells you whether the tracker or the layout decision failed.
+tracked independently. Audio targets −14 LUFS with a two-pass
+`loudnorm`; pass `--no-normalize` for untouched audio. Reframing writes
+`clips/clip_00N.reframe.json` with the tracks, panel boxes, crop paths, and
+notes; per-shot clips add a `shots` array with each shot's layout and reason.
+Read it when a crop looks wrong; it tells you whether the tracker or the layout
+decision failed.
 
 ### 6. Inspect and iterate
 

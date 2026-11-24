@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from clipkit.asr import get_backend
@@ -8,7 +10,15 @@ from clipkit.candidates import generate_candidates
 from clipkit.captions import CaptionStyle, ensure_caption_font, write_ass
 from clipkit.errors import ClipkitError
 from clipkit.features import compute_features
-from clipkit.media import extract_audio, probe_media, read_wav, render_clip
+from clipkit.media import (
+    DEFAULT_SCENE_THRESHOLD,
+    concat_clips,
+    extract_audio,
+    finalize_clip,
+    probe_media,
+    read_wav,
+    render_clip,
+)
 from clipkit.models import (
     Candidate,
     ClipResult,
@@ -17,7 +27,7 @@ from clipkit.models import (
     RenderOptions,
     Transcript,
 )
-from clipkit.reframe import plan_reframe
+from clipkit.reframe import ReframePlan, plan_reframe
 from clipkit.util import file_sha256, now_iso, read_json
 from clipkit.workspace import Workspace
 
@@ -141,7 +151,11 @@ def ensure_features(
     scenes: bool = True,
     force: bool = False,
 ) -> Features:
-    params = {"scenes": scenes, "hop": 0.5}
+    params = {
+        "scenes": scenes,
+        "hop": 0.5,
+        "scene_threshold": DEFAULT_SCENE_THRESHOLD,
+    }
     destination = ws.root / "features.json"
     if not force and ws.stage_is_valid("features", params) and destination.exists():
         return Features.model_validate(read_json(destination))
@@ -214,6 +228,255 @@ def _resolve_hook(candidate: Candidate, options: RenderOptions) -> str | None:
     return None
 
 
+# Shots shorter than this are merged into a neighbour. Scene detectors fire on
+# flashes and one-frame transitions; rendering those as separate segments adds
+# overhead and gives the layout planner too little signal.
+MIN_SHOT_SECONDS = 0.6
+
+
+@dataclass
+class ShotLayout:
+    start: float
+    end: float
+    layout: str
+    plan: ReframePlan
+    reason: str = ""
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+
+def _shot_boundaries(
+    cuts: list[float],
+    duration: float,
+    *,
+    min_shot: float = MIN_SHOT_SECONDS,
+) -> list[tuple[float, float]]:
+    points = sorted(
+        {0.0, max(0.0, duration)}
+        | {max(0.0, min(duration, float(cut))) for cut in cuts}
+    )
+    merged: list[list[float]] = []
+    for start, end in zip(points, points[1:]):
+        if end - start <= 1e-3:
+            continue
+        if merged and (
+            end - start < min_shot or end - merged[-1][0] < min_shot
+        ):
+            merged[-1][1] = end
+        else:
+            merged.append([start, end])
+    if len(merged) > 1 and merged[0][1] - merged[0][0] < min_shot:
+        merged[1][0] = merged[0][0]
+        merged.pop(0)
+    return [(round(start, 3), round(end, 3)) for start, end in merged]
+
+
+def _has_ambiguous_faces(plan: ReframePlan, frame_width: int) -> bool:
+    """True when a shot has two separated persistent faces but no split decision.
+
+    A single crop in that situation can follow the listener. Keeping the full
+    frame (blur-padded) is the conservative fallback until real active-speaker
+    selection exists. Tracks closer than the split separation threshold are
+    usually duplicate fragments of one person, so they stay on the crop path.
+    """
+    strong = sorted(
+        [
+            track
+            for track in plan.tracks
+            if track.coverage >= 0.25 and track.duration >= 2.0
+        ],
+        key=lambda track: track.prominence,
+        reverse=True,
+    )
+    if len(strong) < 2:
+        return False
+    separation = abs(strong[0].center_x - strong[1].center_x)
+    return separation >= 0.18 * max(1, frame_width)
+
+
+def plan_shot_layout(
+    source: Path,
+    candidate: Candidate,
+    cuts: list[float],
+    options: RenderOptions,
+    media: MediaInfo,
+) -> list[ShotLayout]:
+    """Decide crop/split/blur independently for every shot in the clip."""
+    decisions: list[ShotLayout] = []
+    for start, end in _shot_boundaries(cuts, candidate.duration):
+        plan = plan_reframe(
+            source,
+            start=candidate.start + start,
+            duration=end - start,
+            media=media,
+            scene_changes=[],
+            layout="auto",
+            sample_fps=options.reframe_sample_fps,
+            min_split_duration=options.min_split_duration,
+        )
+        ambiguous = _has_ambiguous_faces(plan, media.width)
+        # On an ultra-wide source, blur-padding a 9:16 frame leaves a thin strip
+        # of picture and huge blurred bands. Crop fills the frame and is the
+        # better fallback; 16:9 sources still get the softer blur treatment.
+        ultra_wide = media.height > 0 and media.width / media.height >= 2.0
+        if plan.used_split:
+            layout = "split"
+            reason = "two persistent, separated faces"
+        elif plan.layout == "single" and not ambiguous:
+            layout = "crop"
+            reason = "single persistent face track"
+        elif ambiguous:
+            layout = "crop" if ultra_wide else "blur"
+            reason = (
+                "multiple separated faces without a split decision; "
+                + ("ultra-wide source uses a center crop" if ultra_wide else "blur keeps both visible")
+            )
+        else:
+            layout = "crop" if ultra_wide else "blur"
+            reason = (
+                "no reliable face track; "
+                + ("ultra-wide source uses a center crop" if ultra_wide else "blur keeps the source context")
+            )
+        decisions.append(
+            ShotLayout(start=start, end=end, layout=layout, plan=plan, reason=reason)
+        )
+    return decisions
+
+
+def _use_per_shot(decisions: list[ShotLayout]) -> bool:
+    if len(decisions) < 2:
+        return False
+    # A uniform crop clip is cheaper and steadier as one merged path. Split
+    # shots must be segmented even when every shot splits, because the global
+    # coverage guard would reject the clip.
+    return len({decision.layout for decision in decisions}) > 1 or any(
+        decision.layout == "split" for decision in decisions
+    )
+
+
+def _store_shot_plan(ws: Workspace, clip_name: str, decisions: list[ShotLayout]) -> Path:
+    return ws.store(
+        f"clips/{clip_name}.reframe.json",
+        {
+            "layout": "per-shot",
+            "notes": [
+                f"{len(decisions)} shots",
+                "layout decided independently per shot",
+            ],
+            "shots": [
+                {
+                    "start": decision.start,
+                    "end": decision.end,
+                    "duration": round(decision.duration, 3),
+                    "layout": decision.layout,
+                    "reason": decision.reason,
+                    "plan": decision.plan.model_dump(mode="json"),
+                }
+                for decision in decisions
+            ],
+        },
+    )
+
+
+def _render_shot_layout(
+    ws: Workspace,
+    candidate: Candidate,
+    clip_path: Path,
+    ass_path: Path | None,
+    decisions: list[ShotLayout],
+    options: RenderOptions,
+    media: MediaInfo,
+) -> None:
+    """Render each shot, concatenate, then mux audio and burn global captions."""
+    shots_dir = ws.clips_dir / f".{clip_path.stem}.shots"
+    shutil.rmtree(shots_dir, ignore_errors=True)
+    shots_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        segments: list[Path] = []
+        for index, decision in enumerate(decisions):
+            segment = shots_dir / f"shot_{index:03d}.mp4"
+            plan = decision.plan
+            crop_path = plan.crop_path if options.reframe == "track" else None
+            center_x = options.crop_center_x
+            if options.reframe in ("face", "track") and plan.static_center_x is not None:
+                center_x = plan.static_center_x
+            render_clip(
+                ws.source_path,
+                segment,
+                start=candidate.start + decision.start,
+                duration=decision.duration,
+                ass_path=None,
+                layout=decision.layout,
+                width=options.width,
+                height=options.height,
+                fps=options.fps,
+                crf=options.crf,
+                normalize_audio=False,
+                has_audio=False,
+                source_width=media.width,
+                source_height=media.height,
+                crop_center_x=center_x,
+                crop_path=crop_path,
+                panels=plan.panel_boxes if decision.layout == "split" else None,
+                panel_paths=plan.panel_paths if decision.layout == "split" else None,
+            )
+            segments.append(segment)
+        combined = shots_dir / "combined.mp4"
+        concat_clips(segments, combined, fps=options.fps, crf=options.crf)
+        finalize_clip(
+            combined,
+            ws.source_path,
+            clip_path,
+            start=candidate.start,
+            duration=candidate.duration,
+            ass_path=ass_path,
+            has_audio=media.has_audio,
+            normalize_audio=options.normalize_audio,
+            fps=options.fps,
+            crf=options.crf,
+        )
+    finally:
+        shutil.rmtree(shots_dir, ignore_errors=True)
+
+
+def _render_single_clip(
+    ws: Workspace,
+    candidate: Candidate,
+    clip_path: Path,
+    ass_path: Path | None,
+    options: RenderOptions,
+    media: MediaInfo,
+    *,
+    layout: str,
+    center_x: float | None,
+    crop_path: list | None,
+    panels: list | None,
+    panel_paths: list | None,
+) -> None:
+    render_clip(
+        ws.source_path,
+        clip_path,
+        start=candidate.start,
+        duration=candidate.duration,
+        ass_path=ass_path,
+        layout=layout,
+        width=options.width,
+        height=options.height,
+        fps=options.fps,
+        crf=options.crf,
+        normalize_audio=options.normalize_audio,
+        has_audio=media.has_audio,
+        source_width=media.width,
+        source_height=media.height,
+        crop_center_x=center_x,
+        crop_path=crop_path,
+        panels=panels,
+        panel_paths=panel_paths,
+    )
+
+
 def render_candidates(
     ws: Workspace,
     candidates: list[Candidate],
@@ -271,6 +534,8 @@ def render_candidates(
             crop_path = None
             render_layout = options.layout
             plan_path: Path | None = None
+            per_shot = False
+            shot_decisions: list[ShotLayout] = []
 
             if needs_plan and options.layout != "blur":
                 try:
@@ -279,59 +544,76 @@ def render_candidates(
                         for at in (features.scene_changes if features else [])
                         if candidate.start <= at <= candidate.end
                     ]
-                    plan = plan_reframe(
-                        ws.source_path,
-                        start=candidate.start,
-                        duration=candidate.duration,
-                        media=media,
-                        scene_changes=cuts,
-                        layout=options.layout,
-                        sample_fps=options.reframe_sample_fps,
-                        min_split_duration=options.min_split_duration,
-                    )
-                    plan_path = ws.store(
-                        f"clips/{clip_name}.reframe.json", plan.model_dump(mode="json")
-                    )
-                    if options.layout in ("auto", "split") and plan.used_split:
-                        render_layout = "split"
-                        panels = plan.panel_boxes
-                        panel_paths = plan.panel_paths
-                    else:
-                        render_layout = "crop"
-                        if options.layout == "split":
-                            print(
-                                f"[render] {clip_name}: split requested but plan is "
-                                f"'{plan.layout}'; using single crop",
-                                file=sys.stderr,
-                            )
-                    if options.reframe in ("face", "track") and plan.static_center_x is not None:
-                        center_x = plan.static_center_x
-                    if options.reframe == "track" and plan.crop_path:
-                        crop_path = plan.crop_path
+                    if options.layout == "auto" and options.per_shot_layout and cuts:
+                        decisions = plan_shot_layout(
+                            ws.source_path, candidate, cuts, options, media
+                        )
+                        if _use_per_shot(decisions):
+                            per_shot = True
+                            shot_decisions = decisions
+                            plan_path = _store_shot_plan(ws, clip_name, decisions)
+                            render_layout = "per-shot"
+                    if not per_shot:
+                        plan = plan_reframe(
+                            ws.source_path,
+                            start=candidate.start,
+                            duration=candidate.duration,
+                            media=media,
+                            scene_changes=cuts,
+                            layout=options.layout,
+                            sample_fps=options.reframe_sample_fps,
+                            min_split_duration=options.min_split_duration,
+                        )
+                        plan_path = ws.store(
+                            f"clips/{clip_name}.reframe.json", plan.model_dump(mode="json")
+                        )
+                        if options.layout in ("auto", "split") and plan.used_split:
+                            render_layout = "split"
+                            panels = plan.panel_boxes
+                            panel_paths = plan.panel_paths
+                        else:
+                            render_layout = "crop"
+                            if options.layout == "split":
+                                print(
+                                    f"[render] {clip_name}: split requested but plan is "
+                                    f"'{plan.layout}'; using single crop",
+                                    file=sys.stderr,
+                                )
+                        if options.reframe in ("face", "track") and plan.static_center_x is not None:
+                            center_x = plan.static_center_x
+                        if options.reframe == "track" and plan.crop_path:
+                            crop_path = plan.crop_path
                 except Exception as exc:  # noqa: BLE001 - reframe is best-effort
                     print(f"[render] face tracking unavailable: {exc}", file=sys.stderr)
                     render_layout = "crop" if options.layout != "blur" else "blur"
 
-            render_clip(
-                ws.source_path,
-                clip_path,
-                start=candidate.start,
-                duration=candidate.duration,
-                ass_path=ass_path,
-                layout=render_layout,
-                width=options.width,
-                height=options.height,
-                fps=options.fps,
-                crf=options.crf,
-                normalize_audio=options.normalize_audio,
-                has_audio=media.has_audio,
-                source_width=media.width,
-                source_height=media.height,
-                crop_center_x=center_x,
-                crop_path=crop_path,
-                panels=panels,
-                panel_paths=panel_paths,
-            )
+            if per_shot:
+                try:
+                    _render_shot_layout(
+                        ws, candidate, clip_path, ass_path, shot_decisions, options, media
+                    )
+                except Exception as exc:  # noqa: BLE001 - fall back to a safe crop
+                    print(
+                        f"[render] {clip_name}: per-shot layout failed ({exc}); "
+                        "falling back to single crop",
+                        file=sys.stderr,
+                    )
+                    render_layout = "crop"
+                    per_shot = False
+            if not per_shot:
+                _render_single_clip(
+                    ws,
+                    candidate,
+                    clip_path,
+                    ass_path,
+                    options,
+                    media,
+                    layout=render_layout,
+                    center_x=center_x,
+                    crop_path=crop_path,
+                    panels=panels,
+                    panel_paths=panel_paths,
+                )
             info = probe_media(clip_path)
             result = ClipResult(
                 id=clip_name,

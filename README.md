@@ -4,7 +4,7 @@
 
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
-**v0.4.5** — per-clip hooks, split-screen coverage guard, default scene detection, and UX fixes.
+**v0.5.0** — per-shot layout, two-pass loudness, per-clip hooks, and split-screen quality guards.
 
 ```bash
 clipkit init podcast.mp4
@@ -77,7 +77,7 @@ clipkit analyze -w demo.clipkit --min-seconds 20 --max-seconds 60 --top 10
 # 4. read the candidates
 clipkit candidates -w demo.clipkit --top 10 --json
 
-# 5. render chosen candidates (auto split-screen + tracked crop)
+# 5. render chosen candidates (per-shot layout + tracked crop)
 clipkit render -w demo.clipkit --ids c0000123_0004567 --layout auto --reframe track --hook-from-title
 
 # 6. review the contact sheet (clip ids are printed by render)
@@ -93,15 +93,16 @@ clipkit auto interview.mp4 -w demo.clipkit --top 3
 ### Reframing
 
 - `--layout crop` — one 9:16 crop (default).
-- `--layout auto` — detect faces; use split-screen when two persistent,
-  horizontally separated speakers share the frame for most of the clip,
-  otherwise a single crop.
+- `--layout auto` — plan every shot independently: one persistent face → crop,
+  two separated co-visible faces → split, ambiguous multi-face → blur, no
+  reliable face → blur.
 - `--layout split` — force split-screen if the tracker finds two eligible faces.
 - `--layout blur` — keep the full frame and blur-pad the background.
 - `--reframe center|face|track` — center, static median face, or a smoothed
   per-frame crop path (sendcmd). `track` follows a moving speaker.
 - `--reframe-fps 4 --min-split 2.0` — control tracking density and the
   hysteresis threshold for split-screen.
+- `--no-per-shot` — use one layout for the whole clip instead of per-shot.
 - `--crop-center X` — source x-coordinate for a static crop. Useful for
   fixed-camera talks and as a safe fallback when tracking confidence is low.
 
@@ -118,14 +119,20 @@ independently with their own `sendcmd` crop paths; each panel is a 9:16 crop
 scaled over a blurred fill. With 3+ persistent faces, the top two by prominence
 (screen time × face size) get the split.
 
-Split-screen is a whole-clip decision, so the chosen pair must be co-visible for
-at least 70% of the clip (plus 2s of overlap and 18% horizontal separation).
-Below that, a panel would hold a stale position and show empty background after
-a cut, so the renderer falls back to a single tracked crop and records why in
-the sidecar.
+Split-screen is a whole-clip decision when `--no-per-shot` is used, so the
+chosen pair must be co-visible for at least 70% of the clip (plus 2s of overlap
+and 18% horizontal separation). Below that, a panel would hold a stale position
+and show empty background after a cut, so the renderer falls back to a single
+tracked crop and records why in the sidecar. With per-shot layout, each shot is
+short enough that the same guard applies cleanly inside the shot.
 
 Every clip writes `clips/clip_001.reframe.json` with the detected tracks, panel
-boxes, crop paths, and layout decision, so reframing is auditable.
+boxes, crop paths, and layout decision, so reframing is auditable. Per-shot
+clips write `layout: "per-shot"` plus a `shots` array, where each shot has its
+layout, reason, and full reframe plan.
+
+Audio targets −14 LUFS with a two-pass `loudnorm`: clipkit measures
+the segment first, then applies the measured values. `--no-normalize` skips it.
 
 ### Hook banner
 
@@ -329,16 +336,16 @@ Working v1:
 - [x] deterministic candidate generation + transparent scoring
 - [x] YuNet face detection (MIT, bundled) + Haar fallback
 - [x] Kalman-predicted, ByteTrack-style tracking with smoothed crop paths
-- [x] auto split-screen for 2 persistent speakers (70% co-visibility + hysteresis)
+- [x] auto per-shot crop/split/blur with 70% split co-visibility guard
 - [x] appearance re-ID through short occlusion; 3+ face prominence policy
 - [x] dynamic split panels, face-aware center crop, auditable reframe plans
 - [x] ASS karaoke captions, brand style JSON
 - [x] hook banner (`--hook-text`, `--hook-from-title`, `--hooks` per clip, styleable)
 - [x] containment-aware candidate dedupe + content-word diversity
-- [x] 1080×1920 render with loudness normalization
+- [x] 1080×1920 render with two-pass loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 84 tests, including an ffmpeg end-to-end test
+- [x] 94 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:
