@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.4 — per-clip hooks
+
+- **Per-clip hooks:** `render` / `auto` accept `--hooks hooks.json`, a JSON
+  object mapping candidate ids to banner text. One render now produces a batch
+  with a different hook per clip, instead of one command per hook. Precedence is
+  per-candidate hook → `--hook-text` → `--hook-from-title`; unknown candidate
+  ids warn instead of failing silently. The MCP `clipkit_render` tool accepts a
+  `hooks` object directly.
+- Tests: 83 pass (was 77); `ruff` clean.
+
 ## 0.4.3 — hook banners, candidate diversity, UX
 
 - **Hook banner:** `render` / `auto` accept `--hook-text "..."` or

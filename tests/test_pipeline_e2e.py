@@ -125,7 +125,7 @@ def test_full_pipeline_with_mock_transcript(tmp_path):
             layout="crop",
             captions=True,
             normalize_audio=False,
-            hook_text="Watch this before your next talk",
+            hooks={candidates[0].id: "Watch this before your next talk"},
         ),
         force=True,
     )

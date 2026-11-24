@@ -111,6 +111,8 @@ Options:
 - `--style style.json` — brand fonts/colors/position.
 - `--hook-text "..."` — banner the same hook at the top of every rendered clip.
 - `--hook-from-title` — use each candidate's title hint as its hook banner.
+- `--hooks hooks.json` — JSON object mapping candidate ids to per-clip hooks;
+  wins over `--hook-text` and `--hook-from-title`.
 - `--top N` — render the top N if you do not pass ids.
 
 Tracking uses YuNet (bundled, MIT) with a Haar fallback, Kalman-predicted

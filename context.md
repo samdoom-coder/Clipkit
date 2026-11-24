@@ -5,13 +5,13 @@
 | | |
 |---|---|
 | Project | `clipkit` — open, agent-native clip studio |
-| Version | `0.4.3` |
-| Baseline commit | latest on `main` (0.4.3 hook banner + candidate diversity) |
+| Version | `0.4.4` |
+| Baseline commit | latest on `main` (0.4.4 per-clip hooks) |
 | License | Apache-2.0 |
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 77 tests passing; CI on every push/PR |
+| Status | Working local MVP; 83 tests passing; CI on every push/PR |
 
 ---
 
@@ -74,13 +74,14 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - `clipkit eval` + `clipkit_eval` MCP tool for precision@k / coverage recall.
 - Seed regression labels in `evals/seed_labels.json`.
 - Loudness normalization (`loudnorm -14 LUFS`) and faststart.
-- Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`).
+- Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`
+  / `--hooks hooks.json` for a different hook per clip).
 - Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 77 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 83 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`.
 
@@ -106,7 +107,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 77 pass
+python -m pytest -q                    # 83 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -201,7 +202,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 77 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 83 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -476,7 +477,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 77 pass
+python -m pytest -q        # 83 pass
 ruff check src tests evals # clean
 ```
 

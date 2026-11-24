@@ -44,6 +44,32 @@ def _workspace(args) -> Workspace:
     return Workspace.load(getattr(args, "workspace", ".clipkit"))
 
 
+def _load_hooks(path: str | None) -> dict[str, str]:
+    """Load a candidate-id -> hook-text JSON object."""
+    if not path:
+        return {}
+    data = read_json(Path(path).expanduser())
+    if not isinstance(data, dict):
+        raise ClipkitError("--hooks must be a JSON object mapping candidate ids to hook text")
+    hooks: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ClipkitError("--hooks keys and values must be strings")
+        if value.strip():
+            hooks[key] = value.strip()
+    return hooks
+
+
+def _warn_unknown_hooks(hooks: dict[str, str], candidates) -> None:
+    known = {candidate.id for candidate in candidates}
+    unknown = sorted(set(hooks) - known)
+    if unknown:
+        print(
+            f"warning: hooks for unknown candidate id(s): {', '.join(unknown)}",
+            file=sys.stderr,
+        )
+
+
 def _reset_workspace(root: Path) -> None:
     for name in ("project.json", "media.json", "transcript.json", "features.json", "candidates.json", "audio.wav"):
         path = root / name
@@ -185,6 +211,8 @@ def cmd_render(args) -> int:
     candidates = load_candidates(ws)
     if not candidates:
         raise ClipkitError("no candidates — run `clipkit analyze` first")
+    hooks = _load_hooks(args.hooks)
+    _warn_unknown_hooks(hooks, candidates)
 
     selected: list[Candidate]
     if args.ids:
@@ -212,6 +240,7 @@ def cmd_render(args) -> int:
         crf=args.crf,
         hook_text=args.hook_text,
         hook_from_title=args.hook_from_title,
+        hooks=hooks,
     )
     results = render_candidates(ws, selected, options=options, style=style, force=args.force)
     if args.json:
@@ -273,6 +302,8 @@ def cmd_auto(args) -> int:
     style = CaptionStyle()
     if args.style:
         style = CaptionStyle.from_dict(read_json(Path(args.style)))
+    hooks = _load_hooks(args.hooks)
+    _warn_unknown_hooks(hooks, candidates)
     options = RenderOptions(
         layout=args.layout,
         captions=not args.no_captions,
@@ -287,6 +318,7 @@ def cmd_auto(args) -> int:
         crf=args.crf,
         hook_text=args.hook_text,
         hook_from_title=args.hook_from_title,
+        hooks=hooks,
     )
     results = render_candidates(ws, candidates[: args.top], options=options, style=style)
     rendered = [result for result in results if not result.skipped]
@@ -506,6 +538,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use each candidate's title as its hook banner",
     )
+    p.add_argument(
+        "--hooks",
+        help="JSON object mapping candidate ids to per-clip hook text",
+    )
     p.add_argument("--style", help="caption style JSON")
     p.add_argument("--width", type=int, default=1080)
     p.add_argument("--height", type=int, default=1920)
@@ -546,6 +582,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--hook-from-title",
         action="store_true",
         help="use each candidate's title as its hook banner",
+    )
+    p.add_argument(
+        "--hooks",
+        help="JSON object mapping candidate ids to per-clip hook text",
     )
     p.add_argument("--style")
     p.add_argument("--width", type=int, default=1080)

@@ -4,7 +4,7 @@
 
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
-**v0.4.3** — hook banners, candidate diversity, and UX fixes.
+**v0.4.4** — per-clip hooks, hook banners, candidate diversity, and UX fixes.
 
 ```bash
 clipkit init podcast.mp4
@@ -127,6 +127,22 @@ Add a styled banner at the top of the frame:
 clipkit render -w demo.clipkit --ids c0000123_0004567 --hook-text "Stop winging it"
 clipkit render -w demo.clipkit --top 3 --hook-from-title   # per-candidate title
 ```
+
+For different hooks per clip, pass a JSON object keyed by candidate id:
+
+```bash
+cat > hooks.json <<'JSON'
+{
+  "c0000123_0004567": "Stop winging it",
+  "c0000789_0012345": "The 30-second fix"
+}
+JSON
+clipkit render -w demo.clipkit --ids c0000123_0004567,c0000789_0012345 --hooks hooks.json
+```
+
+Precedence is per-candidate hook → `--hook-text` → `--hook-from-title`. A hook
+key that matches no candidate in the workspace prints a warning, so typos do
+not silently produce a banner-free clip.
 
 The banner is also available on `clipkit auto` and the MCP `clipkit_render` tool
 (`hook_text` / `hook_from_title`). It is part of the caption style, so a style
@@ -309,12 +325,12 @@ Working v1:
 - [x] appearance re-ID through short occlusion; 3+ face prominence policy
 - [x] dynamic split panels, face-aware center crop, auditable reframe plans
 - [x] ASS karaoke captions, brand style JSON
-- [x] hook banner (`--hook-text`, `--hook-from-title`, styleable)
+- [x] hook banner (`--hook-text`, `--hook-from-title`, `--hooks` per clip, styleable)
 - [x] containment-aware candidate dedupe + content-word diversity
 - [x] 1080×1920 render with loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 77 tests, including an ffmpeg end-to-end test
+- [x] 83 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:

@@ -202,6 +202,18 @@ def load_candidates(ws: Workspace) -> list[Candidate]:
 
 
 # --------------------------------------------------------------------------- render
+def _resolve_hook(candidate: Candidate, options: RenderOptions) -> str | None:
+    """Per-candidate hook wins, then an explicit global hook, then the title hint."""
+    hook = options.hooks.get(candidate.id)
+    if hook:
+        return hook
+    if options.hook_text:
+        return options.hook_text
+    if options.hook_from_title:
+        return candidate.title_hint or None
+    return None
+
+
 def render_candidates(
     ws: Workspace,
     candidates: list[Candidate],
@@ -238,21 +250,20 @@ def render_candidates(
 
             hook_text = None
             ass_path: Path | None = None
-            if options.captions or options.hook_text or options.hook_from_title:
-                hook_text = options.hook_text
-                if not hook_text and options.hook_from_title:
-                    hook_text = candidate.title_hint or None
-                ensure_caption_font(ws.clips_dir)
-                ass_path = ws.clips_dir / f"{clip_name}.ass"
-                write_ass(
-                    ass_path,
-                    transcript.words_between(candidate.start, candidate.end),
-                    clip_start=candidate.start,
-                    clip_end=candidate.end,
-                    style=style,
-                    hook_text=hook_text,
-                    captions=options.captions,
-                )
+            if options.captions or options.hook_text or options.hook_from_title or options.hooks:
+                hook_text = _resolve_hook(candidate, options)
+                if options.captions or hook_text:
+                    ensure_caption_font(ws.clips_dir)
+                    ass_path = ws.clips_dir / f"{clip_name}.ass"
+                    write_ass(
+                        ass_path,
+                        transcript.words_between(candidate.start, candidate.end),
+                        clip_start=candidate.start,
+                        clip_end=candidate.end,
+                        style=style,
+                        hook_text=hook_text,
+                        captions=options.captions,
+                    )
 
             center_x = options.crop_center_x
             panels = None

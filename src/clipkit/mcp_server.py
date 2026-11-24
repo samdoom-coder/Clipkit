@@ -260,6 +260,7 @@ def clipkit_render(
     style: str | None = None,
     hook_text: str | None = None,
     hook_from_title: bool = False,
+    hooks: dict[str, str] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     """Render chosen candidates as 1080x1920 captioned MP4s.
@@ -274,6 +275,8 @@ def clipkit_render(
     style may point to a caption-style JSON file.
     hook_text draws a banner at the top of every clip; hook_from_title uses each
     candidate's title instead (explicit hook_text wins when both are set).
+    hooks maps candidate ids to per-clip banner text and takes precedence over
+    both hook_text and hook_from_title.
     """
     ws = _ws(workspace)
     candidates = load_candidates(ws)
@@ -300,6 +303,7 @@ def clipkit_render(
             crop_center_x=crop_center,
             hook_text=hook_text,
             hook_from_title=hook_from_title,
+            hooks=hooks or {},
         ),
         style=caption_style,
         force=force,

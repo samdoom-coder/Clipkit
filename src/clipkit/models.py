@@ -217,3 +217,6 @@ class RenderOptions(BaseModel):
     crop_center_x: float | None = None
     hook_text: str | None = None
     hook_from_title: bool = False
+    # Candidate id -> banner text. Per-candidate hooks are how an agent gives
+    # each clip its own hook without re-running render once per clip.
+    hooks: dict[str, str] = Field(default_factory=dict)
