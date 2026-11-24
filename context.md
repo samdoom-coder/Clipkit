@@ -12,6 +12,8 @@
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
 | Status | Working local MVP; 94 tests passing; CI on every push/PR |
+| Release | 0.5.0; local `main` is 6 commits ahead of `origin`, tag `v0.5.0`, push pending |
+| Next work | `FUTURE.md` §0.6 checklist (soft cuts, split-pair identity, true ASD, captions) |
 
 ---
 

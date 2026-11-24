@@ -1,13 +1,36 @@
-# clipkit — next phase plan (0.5)
+# clipkit — next phase plan (0.6)
 
 **Status:** 0.5.0 shipped per-shot layout, two-pass loudness, per-clip hooks,
-and the split-screen co-visibility guard. Still open from this plan: better
-split-pair selection, true active-speaker detection, soft-cut detection, and
-overlay handling. The core pipeline now has four real-video validations (FO588
-podcast, a TEDx talk, a two-speaker film excerpt, and a 16:9 crop→split→crop
-composite).
+and the split-screen co-visibility guard. `main` is six commits ahead of
+`origin` and the user will push; do not rewrite history. Tag `v0.5.0`.
 
-This file is the working plan for 0.5. It is intentionally concrete: each item
+The core pipeline has four real-video validations: the FO588 podcast, a TEDx
+talk, a cut-heavy two-speaker film excerpt, and a 16:9 crop→split→crop
+composite. See `docs/real-video-test-0.5.md` for the last two.
+
+## 0.6 next-session checklist (read this first)
+
+Run `python -m pytest -q` (94 pass) and `ruff check src tests evals` before
+changing anything. Then pick the next item in priority order:
+
+1. **Soft-cut detection (P0).** Hard cuts only today; a dissolve can merge two
+   layouts into one shot. Extend §1.
+2. **Split-pair selection and track dedupe (P0).** `eligible[:2]` is still
+   prominence-only; 3+ faces and duplicate tracks can pick the wrong pair. §2.
+3. **True active speaker / diarization (P1).** 0.5.0 is conservative (blur or
+   center crop when multiple separated faces cannot split); it no longer crops
+   a listener by accident, but it does not follow the speaker. §3.
+4. **Per-layout caption placement (P1).** One global y-position is used for crop
+   and split; the lower split panel can be tight. §5.
+5. **Overlay detection (P1).** Baked-in subscribe bars still land in clips. §4.
+6. **Eval labels / score calibration (P2).** The top-ten spread is still ~2.4
+   points; rank is a shortlist, not a verdict. §7.
+
+Known limits to state honestly in release notes: true ASD is not implemented;
+soft cuts are not detected; captions do not move per layout; split-pair
+selection is prominence-based; score calibration is basic.
+
+This file is the working plan for 0.6. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
 
 ---
@@ -114,22 +137,42 @@ remaining work (soft cuts, per-layout captions, a single graph).
   output, correct duration, and two panels in the middle.
 - Real smoke: FO588 538–584s must match the manual 0.4.1 dynamic edit.
 
+### What remains: soft cuts (P0)
+
+The detector is hard-cut only (`scene` score ≥0.25). A slow dissolve or fade can
+join two layouts inside one shot and leave a panel on the wrong person.
+
+Plan:
+
+- Run a second, lower scene pass (0.15) and confirm candidate cuts over a 0.5s
+  window using face-count or layout-change signals; merge false positives.
+- Store confirmed cuts as `soft_cuts` in `features.json` (separate from hard
+  cuts) and let `_shot_boundaries` use both.
+- Keep hard cuts as the default; soft cuts must not fragment a steady shot.
+
+**Acceptance:** a single→two-shot dissolve produces two layouts, with no
+mid-dissolve panel; a normal talking-head clip has no extra segments.
+
 ---
 
 ## 2. Split-pair selection and track dedupe (P0)
 
-**Problem:** `eligible[:2]` by prominence can pick two tracks of the same person.
+**Problem:** `eligible[:2]` by prominence is still the pair policy. On the 0.4.5
+film test, a 3-face shot picked the two most prominent men while a third face sat
+far left; on the 16:9 composite the chosen pair was plausible, but the logic is
+not identity-aware. Duplicate tracks of one person can still win.
 
 **Plan:**
 
 - Deduplicate tracks by median x proximity, appearance-descriptor similarity, and
   temporal overlap before choosing the pair.
 - Choose the pair with the best score:
-  `separation / width * overlap / min_split * min(prominence)`.
+  `separation / width * pair_coverage * min(prominence)`, subject to the 70%
+  co-visibility, 2s overlap, and 18% separation gates.
 - Require different identities: descriptor similarity below a threshold.
-- If no valid pair, fall back to the dominant track's single crop with a note.
-- Add a `--pair left,right` / MCP `panel_pair` override for manual correction
-  (the roadmap's manual speaker picker, limited to two panels).
+- If no valid pair, keep the 0.5.0 fallback (blur on 16:9, crop on ultra-wide)
+  and record the reason.
+- Add a `--pair left,right` / MCP `panel_pair` override for manual correction.
 
 **Acceptance:** on the FO588 two-shot, the pair is always Raj + Vinh, never two
 Vinh tracks; the sidecar records both track IDs and the score.
@@ -139,19 +182,26 @@ Vinh tracks; the sidecar records both track IDs and the score.
 ## 3. Active speaker / diarization (P1)
 
 **Problem:** the crop follows the most prominent face, not the person talking.
+0.5.0 closes the worst failure conservatively: a shot with multiple separated
+faces but no split decision becomes blur (16:9) or a center crop (ultra-wide),
+so it cannot silently frame the listener. It still does not identify the active
+speaker.
 
 **Plan (incremental):**
 
-1. **Cheap first pass:** compute per-face audio-energy correlation. For each
-   tracked face, sample the audio RMS during its visible intervals and prefer the
-   face whose mouth/energy is active. This needs no new model.
+1. **Mouth-motion first pass:** carry a small lower-face grayscale patch on each
+   `FaceBox`; after association, score each track by patch change during speech
+   vs silence. Prefer the higher-motion track in single-crop shots. Validate on
+   the 16:9 composite and a real two-person interview before trusting it.
 2. **Diarization second pass:** optional `pyannote` backend (license check first);
    assign speaker turns to tracks; use the active track for crop and the inactive
    track for reaction shots.
-3. Add `speaker` to `Word`/`Segment` (the model already has an optional field).
+3. Add `speaker` to `Word`/`Segment` (the model already has an optional field)
+   and accept a transcript with speaker labels even without audio diarization.
 
 **Acceptance:** on a two-person podcast, the crop is on the speaker for ≥90% of
-speech frames; listener reaction shots are explicit, not accidental.
+speech frames; listener reaction shots are explicit, not accidental. The 0.5.0
+fallback remains for low-confidence shots.
 
 ---
 
@@ -176,15 +226,17 @@ flagged; a clip can be rendered with and without a delogo pass.
 
 ## 5. Per-layout caption style (P1)
 
-**Problem:** the default `position_y=1450` is right for a single crop but covers
-the lower speaker's face in split-screen.
+**Problem:** the default `position_y=1450` is right for a single crop but can
+crowd the lower speaker's face in split-screen. 0.5.0 uses one global caption
+position across per-shot layout switches; it does not jump, but it cannot move
+into the active panel either.
 
 **Plan:**
 
 - Add `CaptionStyle.for_layout(layout)` or a `split` style block:
   `position_y=1600` or `1750`, font 72–76.
-- Use one style for the whole output when the layout is dynamic; do not jump
-  between y positions at a cut.
+- For per-shot output, either keep one position for the whole file (current) or
+  switch only at shot boundaries with a short fade; never mid-sentence.
 - Add tests for the ASS position in crop vs split vs dynamic.
 
 ---
@@ -246,7 +298,7 @@ Still open:
 
 ---
 
-## 9. Non-goals for 0.5
+## 9. Non-goals for 0.6
 
 - No LLM call in the core. The agent is the editor.
 - No GPL FFmpeg or AGPL YOLO.
@@ -256,13 +308,16 @@ Still open:
 
 ---
 
-## 10. Definition of done for 0.5
+## 10. Definition of done for 0.6
 
-- One command renders a mixed single/two-shot clip with a per-shot layout.
-- The FO588 Lucas clip matches the manual 0.4.1 edit without manual concat.
-- Split pair selection is Raj + Vinh on the FO588 two-shot; no duplicate tracks.
-- The crop follows the active speaker on ≥90% of speech frames in the test set.
+- A soft cut between a single and a two-shot produces two layouts without a
+  mid-dissolve panel.
+- Split-pair selection is identity-aware; duplicate tracks of one person never
+  fill both panels; the sidecar records both track IDs and the score.
+- The crop follows the active speaker on ≥90% of speech frames in a real
+  two-person interview, with the 0.5.0 fallback for low confidence.
+- Captions remain legible in crop and split shots without jumping mid-sentence.
 - Overlay flags are visible in candidates and can be delogoed.
-- 94+ tests pass; `ruff check` is clean; CI is green.
-- `README.md`, `context.md`, and `FUTURE.md` describe the new behavior and the
-  remaining limitations.
+- All tests pass; `ruff check` is clean; CI is green.
+- `README.md`, `context.md`, `FUTURE.md`, and `docs/` describe the new behavior
+  and the remaining limitations.
