@@ -90,7 +90,8 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
   `docs/real-video-test-fo588.md` and `FUTURE.md`. 0.4.3 added a TEDx talk
   (single speaker, 16 min), 0.4.5 added a cut-heavy two-speaker film excerpt
   (`twoperson.clipkit/VALIDATION.md`), and 0.5.0 added a 16:9
-  crop→split→crop composite (`interview.clipkit`).
+  crop→split→crop composite (`interview.clipkit`). See
+  `docs/real-video-test-0.5.md`.
 
 ### Deliberately not built yet
 
