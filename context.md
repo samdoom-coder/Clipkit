@@ -5,13 +5,13 @@
 | | |
 |---|---|
 | Project | `clipkit` — open, agent-native clip studio |
-| Version | `0.4.4` |
-| Baseline commit | latest on `main` (0.4.4 per-clip hooks) |
+| Version | `0.4.5` |
+| Baseline commit | latest on `main` (0.4.5 split coverage guard) |
 | License | Apache-2.0 |
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 83 tests passing; CI on every push/PR |
+| Status | Working local MVP; 84 tests passing; CI on every push/PR |
 
 ---
 
@@ -76,14 +76,18 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Loudness normalization (`loudnorm -14 LUFS`) and faststart.
 - Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`
   / `--hooks hooks.json` for a different hook per clip).
+- Split-screen coverage guard (pair co-visible for 70% of the clip) and
+  default-on hard-cut detection.
 - Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 83 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 84 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
-  `docs/real-video-test-fo588.md` and `FUTURE.md`.
+  `docs/real-video-test-fo588.md` and `FUTURE.md`. 0.4.3 added a TEDx talk
+  (single speaker, 16 min), and 0.4.5 added a cut-heavy two-speaker film excerpt
+  (`twoperson.clipkit/VALIDATION.md` outside the repo).
 
 ### Deliberately not built yet
 
@@ -107,7 +111,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 83 pass
+python -m pytest -q                    # 84 pass
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -202,7 +206,7 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 83 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 84 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -477,7 +481,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 83 pass
+python -m pytest -q        # 84 pass
 ruff check src tests evals # clean
 ```
 
@@ -591,6 +595,13 @@ Real validation performed (not in CI):
     agent had to pick by reading, not by rank. 0.4.3 adds containment-aware NMS,
     content-word dedupe, and warning penalties. If you touch scoring, re-check
     the spread on a real transcript; do not tune against the synthetic fixtures.
+25. **A global split decision needs co-visibility and scene cuts.** The 0.4.5
+    two-speaker test showed both failure modes: without scene cuts, a clean
+    two-shot was merged into one identity (false single), while cut-heavy clips
+    split on a pair that shared the frame for only 27–32% of the clip, leaving a
+    panel on empty background. Hard-cut detection is now default-on, and split
+    requires 70% pair co-visibility. This is a guard, not per-shot layout; do not
+    claim cut-heavy support until `FUTURE.md` §1 lands.
 
 ---
 
@@ -670,12 +681,13 @@ transformers 5.22.1
 numpy 2.4.6
 pydantic 2.14.2
 mcp 2.3.0
-GPU: Tesla T4, 15.6 GB
+GPU: NVIDIA L4, 24 GB
 ```
 
-The machine has no `yt-dlp` installed; URL ingest is therefore untested in this
-environment. Local-file ingest, Rumble ASR, CTC alignment, crop/blur render,
-MCP calls, and the full test suite were exercised.
+`yt-dlp` is installed, but YouTube refuses unauthenticated downloads from this
+environment (`Sign in to confirm you're not a bot`), so a cookies file is needed
+for URL ingest from YouTube. Local-file ingest, Rumble ASR, CTC alignment,
+crop/blur/split render, MCP calls, and the full test suite were exercised.
 
 ---
 

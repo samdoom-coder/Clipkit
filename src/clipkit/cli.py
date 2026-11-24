@@ -508,7 +508,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-seconds", type=float, default=20.0)
     p.add_argument("--max-seconds", type=float, default=60.0)
     p.add_argument("--top", type=int, default=10)
-    p.add_argument("--scenes", action="store_true", help="detect hard cuts (slower)")
+    p.add_argument(
+        "--scenes",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="detect hard cuts (default: on; --no-scenes skips it on long videos)",
+    )
     p.add_argument("--force", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_analyze)
@@ -565,7 +570,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-seconds", type=float, default=20.0)
     p.add_argument("--max-seconds", type=float, default=60.0)
     p.add_argument("--top", type=int, default=3)
-    p.add_argument("--scenes", action="store_true")
+    p.add_argument(
+        "--scenes",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="detect hard cuts (default: on; --no-scenes skips it on long videos)",
+    )
     p.add_argument("--layout", default="crop", choices=["crop", "blur", "split", "auto"])
     p.add_argument("--reframe", default="center", choices=["center", "face", "track"])
     p.add_argument("--reframe-fps", type=float, default=4.0, help="face sampling rate for tracking")

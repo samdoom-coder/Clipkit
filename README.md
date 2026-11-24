@@ -4,7 +4,7 @@
 
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
-**v0.4.4** — per-clip hooks, hook banners, candidate diversity, and UX fixes.
+**v0.4.5** — per-clip hooks, split-screen coverage guard, default scene detection, and UX fixes.
 
 ```bash
 clipkit init podcast.mp4
@@ -94,7 +94,8 @@ clipkit auto interview.mp4 -w demo.clipkit --top 3
 
 - `--layout crop` — one 9:16 crop (default).
 - `--layout auto` — detect faces; use split-screen when two persistent,
-  horizontally separated speakers are present, otherwise a single crop.
+  horizontally separated speakers share the frame for most of the clip,
+  otherwise a single crop.
 - `--layout split` — force split-screen if the tracker finds two eligible faces.
 - `--layout blur` — keep the full frame and blur-pad the background.
 - `--reframe center|face|track` — center, static median face, or a smoothed
@@ -107,14 +108,21 @@ clipkit auto interview.mp4 -w demo.clipkit --top 3
 Tracking uses **YuNet** (bundled, MIT) with a Haar fallback, Kalman-predicted
 boxes, and ByteTrack-style high/low-confidence association. A cheap appearance
 descriptor re-identifies a track through short occlusions; scene cuts clear the
-gallery. Faces smaller than 3.5% of the frame height are ignored, and per-shot
-tracks for one speaker are merged into a single largest-face path so cut-heavy
-stage footage stays on the speaker. If the merged path covers less than 20% of
-the clip, the renderer falls back to a static crop instead of following a
-fragmented track. Split panels are tracked independently with their own
-`sendcmd` crop paths; each panel is a 9:16 crop scaled over a blurred fill. With
-3+ persistent faces, the top two by prominence (screen time × face size) get the
-split.
+gallery. Hard-cut detection runs by default during `analyze`/`auto`; pass
+`--no-scenes` to skip it on very long sources. Faces smaller than 3.5% of the
+frame height are ignored, and per-shot tracks for one speaker are merged into a
+single largest-face path so cut-heavy stage footage stays on the speaker. If the
+merged path covers less than 20% of the clip, the renderer falls back to a
+static crop instead of following a fragmented track. Split panels are tracked
+independently with their own `sendcmd` crop paths; each panel is a 9:16 crop
+scaled over a blurred fill. With 3+ persistent faces, the top two by prominence
+(screen time × face size) get the split.
+
+Split-screen is a whole-clip decision, so the chosen pair must be co-visible for
+at least 70% of the clip (plus 2s of overlap and 18% horizontal separation).
+Below that, a panel would hold a stale position and show empty background after
+a cut, so the renderer falls back to a single tracked crop and records why in
+the sidecar.
 
 Every clip writes `clips/clip_001.reframe.json` with the detected tracks, panel
 boxes, crop paths, and layout decision, so reframing is auditable.
@@ -317,11 +325,11 @@ Working v1:
 - [x] resumable workspace + stage cache
 - [x] Rumble-2-Flash, faster-whisper, and existing-transcript backends
 - [x] CTC forced alignment + proportional fallback
-- [x] energy VAD, audio features, optional scene detection
+- [x] energy VAD, audio features, hard-cut detection (default on)
 - [x] deterministic candidate generation + transparent scoring
 - [x] YuNet face detection (MIT, bundled) + Haar fallback
 - [x] Kalman-predicted, ByteTrack-style tracking with smoothed crop paths
-- [x] auto split-screen for 2 persistent, separated speakers (with hysteresis)
+- [x] auto split-screen for 2 persistent speakers (70% co-visibility + hysteresis)
 - [x] appearance re-ID through short occlusion; 3+ face prominence policy
 - [x] dynamic split panels, face-aware center crop, auditable reframe plans
 - [x] ASS karaoke captions, brand style JSON
@@ -330,7 +338,7 @@ Working v1:
 - [x] 1080×1920 render with loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 83 tests, including an ffmpeg end-to-end test
+- [x] 84 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:

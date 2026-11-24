@@ -106,7 +106,11 @@ Options:
 - `--reframe-fps 4` — face sampling rate. Raise to 6 for fast motion; lower to 2
   for speed.
 - `--min-split 2.0` — how many seconds two faces must persist before the layout
-  flips to split-screen (hysteresis).
+  flips to split-screen (hysteresis). Split-screen also needs the pair to be
+  co-visible for at least 70% of the clip; otherwise a panel would hold a stale
+  position across cuts.
+- `--no-scenes` — skip hard-cut detection. It runs by default and keeps track
+  IDs from leaking across shots; only disable it on very long sources.
 - `--no-captions` — clean render.
 - `--style style.json` — brand fonts/colors/position.
 - `--hook-text "..."` — banner the same hook at the top of every rendered clip.

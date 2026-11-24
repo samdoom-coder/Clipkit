@@ -1,10 +1,10 @@
 # clipkit — next phase plan (0.5)
 
-**Status:** 0.4.3 shipped the hook banner, containment-aware candidate dedupe,
-and the inspect/render UX fixes. The 0.5 plan below remains: per-shot layout,
-split-pair selection, active-speaker choice, and overlay handling. 0.4.2 was a
-face-tracking hotfix on top of the 0.4.1 real-video hardening release; the core
-pipeline now has two real-video validations (FO588 podcast and a TEDx talk).
+**Status:** 0.4.5 shipped per-clip hooks, a split-screen co-visibility guard, and
+default-on scene detection. The 0.5 plan below remains: per-shot layout,
+split-pair selection, active-speaker choice, and overlay handling. The core
+pipeline now has three real-video validations (FO588 podcast, a TEDx talk, and a
+two-speaker film excerpt).
 
 This file is the working plan for 0.5. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
@@ -50,6 +50,15 @@ What broke or looked weak:
 The 0.4.3 TEDx render added one more lesson: a hook banner is table stakes for
 Shorts/Reels, and it belongs in the caption style (top-of-frame, two lines,
 semi-transparent box) rather than in a separate render pass.
+
+The 0.4.5 two-speaker validation (a cut-heavy film excerpt) added a ninth:
+
+9. **A global split needs a co-visibility floor.** Without scene cuts, a clean
+   two-shot was merged into one identity and rendered as a single crop; with
+   cuts, cut-heavy clips picked pairs that shared the frame for only 27–32% of
+   the clip, so one panel held a stale position and showed empty background.
+   0.4.5 requires 70% pair co-visibility and turns hard-cut detection on by
+   default. That is a guard, not the fix: per-shot layout is still P0.
 
 ---
 
@@ -244,6 +253,6 @@ Still open:
 - Split pair selection is Raj + Vinh on the FO588 two-shot; no duplicate tracks.
 - The crop follows the active speaker on ≥90% of speech frames in the test set.
 - Overlay flags are visible in candidates and can be delogoed.
-- 77+ tests pass; `ruff check` is clean; CI is green.
+- 84+ tests pass; `ruff check` is clean; CI is green.
 - `README.md`, `context.md`, and `FUTURE.md` describe the new behavior and the
   remaining limitations.

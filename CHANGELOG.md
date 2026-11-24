@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.5 — split-screen quality on cut-heavy footage
+
+- **Split coverage guard:** a clip only splits when the chosen pair shares the
+  frame for at least 70% of the clip, in addition to the 2s hysteresis and 18%
+  horizontal-separation checks. Two tracks that met only briefly — or that came
+  from different shots — used to hold a panel on empty background for the rest
+  of the clip.
+- **Scene cuts on by default:** `analyze` / `auto` now run hard-cut detection
+  unless `--no-scenes` is passed. The two-speaker validation showed that
+  omitting cuts turned a clean two-shot into a single crop and a cut-heavy clip
+  into a false split; clearing track IDs at cuts matters.
+- **Validation:** rendered a continuous two-shot split-screen (100% pair
+  co-visibility, both panels tracked) and confirmed the guard rejects cut-heavy
+  narrative clips. Tests: 84 pass (was 83); `ruff` clean.
+
 ## 0.4.4 — per-clip hooks
 
 - **Per-clip hooks:** `render` / `auto` accept `--hooks hooks.json`, a JSON

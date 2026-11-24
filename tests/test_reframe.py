@@ -238,6 +238,22 @@ def test_plan_reframe_does_not_split_sequential_speakers(monkeypatch):
     assert plan.layout == "single"
 
 
+def test_plan_reframe_requires_the_pair_to_share_the_frame(monkeypatch):
+    samples = []
+    for i in range(40):
+        at = i / 4.0
+        boxes = [_box(500)]
+        if at >= 6.0:  # only 4 of 10 seconds together
+            boxes.append(_box(1500))
+        samples.append((at, boxes))
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "single"
+    assert any("share the frame" in note for note in plan.notes)
+
+
 def test_plan_reframe_without_faces_centers(monkeypatch):
     monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: [(0.0, [])])
     plan = plan_reframe(

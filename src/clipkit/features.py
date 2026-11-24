@@ -13,7 +13,7 @@ def compute_features(
     transcript: Transcript,
     media: MediaInfo,
     *,
-    scenes: bool = False,
+    scenes: bool = True,
     hop: float = 0.5,
 ) -> Features:
     samples, sample_rate = read_wav(audio)

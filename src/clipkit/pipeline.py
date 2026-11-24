@@ -138,7 +138,7 @@ def ensure_features(
     ws: Workspace,
     *,
     transcript: Transcript | None = None,
-    scenes: bool = False,
+    scenes: bool = True,
     force: bool = False,
 ) -> Features:
     params = {"scenes": scenes, "hop": 0.5}

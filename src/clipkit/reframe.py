@@ -22,6 +22,11 @@ MIN_FACE_HEIGHT_RATIO = 0.035
 # A merged single-speaker path is only trusted when it covers this fraction of
 # the sampled clip. Otherwise the caller's static crop center is safer.
 MIN_TRACK_COVERAGE = 0.2
+# Split-screen is a whole-clip decision, so the pair must actually share the
+# frame for most of the clip. Without this floor, two tracks that meet for only
+# a few seconds (or that come from different shots) produced a panel showing
+# empty background for the rest of the clip.
+MIN_PAIR_COVERAGE = 0.7
 
 
 @dataclass
@@ -722,12 +727,14 @@ def plan_reframe(
     layout: str = "auto",
     sample_fps: float = 4.0,
     min_split_duration: float = 2.0,
+    min_pair_coverage: float = MIN_PAIR_COVERAGE,
 ) -> ReframePlan:
     """Decide single vs split-screen and build crop paths.
 
     Split-screen requires two persistent, horizontally separated tracks that
-    overlap in time for at least `min_split_duration`. That is the hysteresis:
-    a brief second face (someone walking behind the speaker) does not flip it.
+    share the frame for at least `min_split_duration` and for
+    `min_pair_coverage` of the clip. The coverage floor is what keeps a global
+    split decision from holding a stale panel across shots in cut-heavy footage.
     """
     info = media or probe_media(video)
     samples = sample_faces(
@@ -782,8 +789,15 @@ def plan_reframe(
         pair = eligible[:2]
         left, right = sorted(pair, key=lambda track: track.median_x())
         separation = abs(left.median_x() - right.median_x())
-        overlap = min(left.last_t, right.last_t) - max(left.first_t, right.first_t)
-        if separation >= 0.18 * max(1, info.width) and overlap >= min_split_duration:
+        left_times = {round(at, 3) for at, _ in left.boxes}
+        right_times = {round(at, 3) for at, _ in right.boxes}
+        shared_seconds = len(left_times & right_times) / max(1e-6, sample_fps)
+        pair_coverage = shared_seconds / duration if duration > 0 else 0.0
+        if (
+            separation >= 0.18 * max(1, info.width)
+            and shared_seconds >= min_split_duration
+            and pair_coverage >= min_pair_coverage
+        ):
             panels = [
                 _panel_box(left.median_x(), left.median_y(), info.width, info.height),
                 _panel_box(right.median_x(), right.median_y(), info.width, info.height),
@@ -820,10 +834,14 @@ def plan_reframe(
                         else "2 persistent face tracks"
                     ),
                     f"horizontal separation {separation:.0f}px",
+                    f"pair co-visible {pair_coverage:.0%} of the clip",
                     "two-panel split-screen with tracked panels",
                 ],
             )
-        split_note = "multiple faces detected but not enough co-temporal separation for split-screen"
+        if separation < 0.18 * max(1, info.width):
+            split_note = "multiple faces detected but not enough co-temporal separation for split-screen"
+        else:
+            split_note = f"two faces share the frame for {pair_coverage:.0%} of the clip; single crop"
 
     # Persistence, not split eligibility, is the right pool for a single crop:
     # a speaker can produce a separate sub-25%-coverage track per camera angle.
