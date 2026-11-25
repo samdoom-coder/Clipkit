@@ -12,7 +12,7 @@ composite. See `docs/real-video-test-0.5.md` for the last two.
 
 ## 0.6 next-session checklist (read this first)
 
-Run `python -m pytest -q` (112 pass, 1 skipped) and
+Run `python -m pytest -q` (115 pass, 1 skipped) and
 `ruff check src tests evals` before changing anything. Then pick the next item
 in priority order:
 
@@ -155,17 +155,22 @@ Implementation (unreleased 0.6):
   rejected. A fixed low-threshold scene pass was not enough on its own: a 1 s
   `xfade` test produced no hits even at 0.08.
 - Candidate runs within 0.5 s of a hard cut are ignored. Every other candidate
-  is confirmed by sampling faces one second either side and requiring a layout
-  change (face count, centre shift ≥15% of width, or face-height ratio ≥1.5).
-  Without OpenCV, soft cuts are skipped rather than guessed at.
+  is confirmed by comparing frames one second either side (a real cut leaves
+  a different picture; a gesture returns to the same composition) and then
+  sampling faces for a layout change (face count, centre shift ≥15% of width,
+  or face-height ratio ≥1.5). Without OpenCV, soft cuts are skipped rather than
+  guessed at.
 - Confirmed times are stored as `soft_cuts` in `features.json`; `render` merges
   them with `scene_changes` for per-shot boundaries and track-gallery resets.
   The features cache key includes a soft-cut version.
 
 **Acceptance:** a single→two-shot dissolve produces two layouts, with no
 mid-dissolve panel; a normal talking-head clip has no extra segments.
-**Still owed:** validate on the 16:9 composite and a real dissolve before a
-0.6 release; synthetic `xfade` coverage lives in `tests/test_softcuts.py`.
+**Validated:** on the Montana von Fliss TEDx talk, the persistent-change check
+reduced 48 candidate confirmations to 12; spot-checked cuts at 210 s, 386 s,
+and 833 s are real wide-to-close camera changes, while gesture-only events at
+523 s are rejected. **Still owed:** the 16:9 composite; synthetic `xfade`
+coverage lives in `tests/test_softcuts.py`.
 
 ---
 

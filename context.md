@@ -11,7 +11,7 @@
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 112 tests passing; CI on every push/PR |
+| Status | Working local MVP; 115 tests passing; CI on every push/PR |
 | Release | 0.5.0 tagged; 0.6 work in progress on `main` (soft cuts, split-pair identity) |
 | Next work | `FUTURE.md` §0.6 checklist (true ASD, per-layout captions, overlays, eval) |
 
@@ -84,14 +84,15 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Split-screen coverage guard (pair co-visible for 70% of the clip),
   identity-aware pair scoring, and default-on hard-cut detection (threshold
   0.25) plus confirmed soft cuts (dissolves/fades).
-- Soft-cut confirmation uses the face layout one second either side of a
-  candidate and requires OpenCV; without the `faces` extra, only hard cuts run.
+- Soft-cut confirmation compares frames one second either side (a real cut
+  leaves a different picture; a gesture returns) and then checks face layout.
+  It requires OpenCV; without the `faces` extra, only hard cuts run.
 - Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 112 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 115 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`. 0.4.3 added a TEDx talk
   (single speaker, 16 min), 0.4.5 added a cut-heavy two-speaker film excerpt
@@ -122,7 +123,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 112 pass, 1 skipped
+python -m pytest -q                    # 115 pass, 1 skipped
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -212,13 +213,13 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/captions.py` | ASS builder, caption + hook-banner style, bundled font copy |
 | `src/clipkit/reframe.py` | YuNet/Haar detection, Kalman tracking, crop-path planner, split layout |
 | `src/clipkit/features.py` | RMS/VAD/WPS/scene feature aggregation |
-| `src/clipkit/softcuts.py` | Bounded dissolve/fade detection + face-layout confirmation |
+| `src/clipkit/softcuts.py` | Bounded dissolve/fade detection + persistent-change/face confirmation |
 | `src/clipkit/evaluation.py` | precision@k / coverage-recall metrics |
 | `src/clipkit/doctor.py` | Toolchain report |
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 112 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 115 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -494,7 +495,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 112 pass, 1 skipped
+python -m pytest -q        # 115 pass, 1 skipped
 ruff check src tests evals # clean
 ```
 
@@ -511,8 +512,9 @@ Coverage highlights:
   scene-cut gallery clear, hysteresis, scene-cut jump, clamped crop path,
   empty scene, YuNet coordinate mapping.
 - `test_softcuts.py`: bounded-run detection, isolated-spike and sustained-motion
-  rejection, face-layout signatures, confirmation gating, hard-cut proximity,
-  OpenCV-absent no-op, features wiring, and a synthetic `xfade` dissolve.
+  rejection, persistent-change gating, face-layout signatures, hard-cut
+  proximity, OpenCV-absent no-op, features wiring, and a synthetic `xfade`
+  dissolve.
 - `test_pipeline_e2e.py`: generates a 24s video with FFmpeg, runs mock transcript
   → features → candidates → crop render → blur render → split render →
   dynamic split panels → sendcmd dynamic crop → contact sheet.

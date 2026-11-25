@@ -111,8 +111,8 @@ Tracking uses **YuNet** (bundled, MIT) with a Haar fallback, Kalman-predicted
 boxes, and ByteTrack-style high/low-confidence association. A cheap appearance
 descriptor re-identifies a track through short occlusions; scene cuts clear the
 gallery. Hard cuts use FFmpeg's scene score; a second low-resolution pass finds
-bounded dissolves/fades and confirms them against face-layout changes before
-splitting a shot. Both run by default during `analyze`/`auto`; pass
+bounded dissolves/fades, then requires both a face-layout change and a
+persistent frame change one second either side before splitting a shot. Both run by default during `analyze`/`auto`; pass
 `--no-scenes` to skip them on very long sources. Soft-cut confirmation needs the
 optional `faces` extra (OpenCV); without it, only hard cuts are used. Faces
 smaller than 3.5% of the frame height are ignored, and per-shot tracks for one
@@ -340,7 +340,7 @@ Working v1:
 - [x] Rumble-2-Flash, faster-whisper, and existing-transcript backends
 - [x] CTC forced alignment + proportional fallback
 - [x] energy VAD, audio features, hard + soft cut detection (default on)
-- [x] bounded dissolve/fade detection confirmed by face-layout change
+- [x] bounded dissolve/fade detection confirmed by layout + persistent change
 - [x] deterministic candidate generation + transparent scoring
 - [x] YuNet face detection (MIT, bundled) + Haar fallback
 - [x] Kalman-predicted, ByteTrack-style tracking with smoothed crop paths
@@ -353,7 +353,7 @@ Working v1:
 - [x] 1080×1920 render with two-pass loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 112 tests, including an ffmpeg end-to-end test
+- [x] 115 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:

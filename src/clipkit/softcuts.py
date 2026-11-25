@@ -6,9 +6,9 @@ the hard-cut detector misses it and two layouts end up inside one shot.
 
 This module finds *bounded* runs of frame-to-frame change. A dissolve is a
 short burst of activity that starts and ends; a pan is sustained activity; a
-flash is one or two isolated spikes. Candidate runs are then confirmed against
-face layout changes, so a lighting change or a camera bump does not fragment a
-normal talking-head shot.
+flash is one or two isolated spikes. Candidate runs are then confirmed against a persistent
+frame change and a face layout change, so a gesture, lighting change, or camera
+bump does not fragment a normal talking-head shot.
 
 The confirmation step needs face detection (the ``faces`` extra). Without it,
 soft cuts are skipped rather than guessed at: hard cuts still work, and a wrong
@@ -20,6 +20,7 @@ from __future__ import annotations
 import statistics
 import subprocess
 import time
+from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,15 @@ CONFIRM_SKIP_SECONDS = 0.5
 MIN_CENTER_SHIFT = 0.15
 MIN_HEIGHT_RATIO = 1.5
 
+# A real transition leaves the picture in a different state. A gesture, a pan,
+# or a camera bump returns to roughly the same composition, even though it
+# produced a burst of frame-to-frame change. Compare one-second-apart
+# snapshots and require either a large mean difference or a large changed area.
+SNAPSHOT_FPS = 1.0
+PIXEL_DELTA = 20
+MIN_PERSISTENT_MEAN = 20.0
+MIN_PERSISTENT_FRACTION = 0.30
+
 
 @dataclass(frozen=True)
 class ActivityRun:
@@ -73,19 +83,19 @@ class LayoutSignature:
     height: float = 0.0
 
 
-def frame_differences(
+def frame_change_series(
     source: Path,
     *,
     fps: float = SOFT_CUT_FPS,
     width: int = SOFT_CUT_WIDTH,
     height: int = SOFT_CUT_HEIGHT,
     timeout: int = 180,
-) -> tuple[list[float], list[float]]:
-    """Return (times, mean absolute pixel difference) for downscaled frames.
+) -> tuple[list[float], list[float], list[float], list[np.ndarray]]:
+    """Return (times, diffs, snapshot_times, snapshots) from one decode pass.
 
-    Frames are streamed, not buffered, so an hour-long source stays cheap in
-    memory. This is a best-effort signal: the caller treats failures as "no
-    soft cuts", not as a pipeline error.
+    Frames are streamed; only one low-resolution snapshot per second is kept
+    for the before/after check. A two-hour source costs ~100 MB of snapshots,
+    far less than decoding the video again per candidate.
     """
     require_ffmpeg()
     cmd = [
@@ -106,6 +116,9 @@ def frame_differences(
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     times: list[float] = []
     diffs: list[float] = []
+    snapshot_times: list[float] = []
+    snapshots: list[np.ndarray] = []
+    snapshot_stride = max(1, round(fps / SNAPSHOT_FPS))
     previous: np.ndarray | None = None
     index = 0
     deadline = time.monotonic() + timeout
@@ -119,6 +132,9 @@ def frame_differences(
             if previous is not None:
                 times.append(round(index / fps, 3))
                 diffs.append(float(np.abs(frame.astype(np.float32) - previous).mean()))
+            if index % snapshot_stride == 0:
+                snapshot_times.append(round(index / fps, 3))
+                snapshots.append(frame.copy())
             previous = frame.astype(np.float32)
             index += 1
     finally:
@@ -131,7 +147,60 @@ def frame_differences(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+    return times, diffs, snapshot_times, snapshots
+
+
+def frame_differences(
+    source: Path,
+    *,
+    fps: float = SOFT_CUT_FPS,
+    width: int = SOFT_CUT_WIDTH,
+    height: int = SOFT_CUT_HEIGHT,
+    timeout: int = 180,
+) -> tuple[list[float], list[float]]:
+    """Backward-compatible (times, mean difference) view of the series."""
+    times, diffs, _snapshot_times, _snapshots = frame_change_series(
+        source, fps=fps, width=width, height=height, timeout=timeout
+    )
     return times, diffs
+
+
+def _nearest_frame(
+    times: list[float], frames: list[np.ndarray], target: float, tolerance: float = 0.6
+) -> np.ndarray | None:
+    if not times:
+        return None
+    index = bisect_left(times, target)
+    choices = [i for i in (index - 1, index) if 0 <= i < len(times)]
+    if not choices:
+        return None
+    best = min(choices, key=lambda i: abs(times[i] - target))
+    return frames[best] if abs(times[best] - target) <= tolerance else None
+
+
+def persistent_change(
+    times: list[float],
+    frames: list[np.ndarray],
+    at: float,
+    *,
+    window: float = CONFIRM_WINDOW,
+) -> tuple[float, float] | None:
+    """Mean difference and changed-pixel fraction across a candidate.
+
+    A dissolve leaves the frame in a new state; a gesture or a camera bump
+    returns to roughly the same picture. Returns None when either snapshot is
+    missing.
+    """
+    before = _nearest_frame(times, frames, at - window)
+    after = _nearest_frame(times, frames, at + window)
+    if before is None or after is None:
+        return None
+    delta = np.abs(before.astype(np.int16) - after.astype(np.int16))
+    return float(delta.mean()), float((delta > PIXEL_DELTA).mean())
+
+
+def is_persistent_change(mean: float, fraction: float) -> bool:
+    return mean >= MIN_PERSISTENT_MEAN or fraction >= MIN_PERSISTENT_FRACTION
 
 
 def activity_runs(
@@ -322,13 +391,18 @@ def detect_soft_cuts(
     if not _has_opencv():
         return []
     try:
-        times, diffs = frame_differences(source, timeout=timeout)
+        times, diffs, snapshot_times, snapshots = frame_change_series(
+            source, timeout=timeout
+        )
     except (ClipkitError, DependencyError):
         return []
 
     confirmed: list[float] = []
     for run in activity_runs(times, diffs):
         if any(abs(run.midpoint - cut) <= HARD_CUT_MARGIN for cut in hard_cuts):
+            continue
+        change = persistent_change(snapshot_times, snapshots, run.midpoint)
+        if change is None or not is_persistent_change(*change):
             continue
         try:
             changed = _layout_changes_at(

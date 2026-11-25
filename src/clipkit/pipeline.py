@@ -156,7 +156,7 @@ def ensure_features(
         "hop": 0.5,
         "scene_threshold": DEFAULT_SCENE_THRESHOLD,
         # Bump when the soft-cut detector changes so old features recompute.
-        "soft_cuts": 1,
+        "soft_cuts": 2,
     }
     destination = ws.root / "features.json"
     if not force and ws.stage_is_valid("features", params) and destination.exists():

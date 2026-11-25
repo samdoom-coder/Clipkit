@@ -15,7 +15,9 @@ from clipkit.softcuts import (
     activity_runs,
     detect_soft_cuts,
     frame_differences,
+    is_persistent_change,
     layout_changed,
+    persistent_change,
 )
 
 
@@ -104,12 +106,35 @@ def _synthetic_diffs() -> tuple[list[float], list[float]]:
     return times, diffs
 
 
-def test_detect_soft_cuts_requires_confirmation(monkeypatch):
+def _synthetic_series(*, changed: bool = True):
     times, diffs = _synthetic_diffs()
+    before = np.zeros((90, 160), dtype=np.uint8)
+    after = np.full((90, 160), 255, dtype=np.uint8) if changed else before.copy()
+    return times, diffs, [1.5, 3.5], [before, after]
+
+
+def test_persistent_change_compares_frames_either_side():
+    before = np.zeros((90, 160), dtype=np.uint8)
+    after = np.full((90, 160), 255, dtype=np.uint8)
+    change = persistent_change([1.5, 3.5], [before, after], 2.5)
+    assert change is not None
+    assert change[0] > 200
+    assert is_persistent_change(*change)
+
+
+def test_gesture_only_change_does_not_pass_persistent_check():
+    before = np.zeros((90, 160), dtype=np.uint8)
+    after = before.copy()
+    after[30:60, 70:90] = 40  # a hand moved, not a new shot
+    change = persistent_change([1.5, 3.5], [before, after], 2.5)
+    assert change is not None
+    assert not is_persistent_change(*change)
+
+
+def test_detect_soft_cuts_requires_confirmation(monkeypatch):
+    series = _synthetic_series()
     monkeypatch.setattr("clipkit.softcuts._has_opencv", lambda: True)
-    monkeypatch.setattr(
-        "clipkit.softcuts.frame_differences", lambda *a, **k: (times, diffs)
-    )
+    monkeypatch.setattr("clipkit.softcuts.frame_change_series", lambda *a, **k: series)
     monkeypatch.setattr("clipkit.softcuts._layout_changes_at", lambda *a, **k: True)
     cuts = detect_soft_cuts(
         Path("/tmp/source.mp4"), hard_cuts=[], duration=10.0, width=1920, height=1080
@@ -118,12 +143,21 @@ def test_detect_soft_cuts_requires_confirmation(monkeypatch):
     assert 2.4 <= cuts[0] <= 2.7
 
 
-def test_detect_soft_cuts_skips_candidate_next_to_hard_cut(monkeypatch):
-    times, diffs = _synthetic_diffs()
+def test_detect_soft_cuts_rejects_gesture_only_change(monkeypatch):
+    series = _synthetic_series(changed=False)
     monkeypatch.setattr("clipkit.softcuts._has_opencv", lambda: True)
-    monkeypatch.setattr(
-        "clipkit.softcuts.frame_differences", lambda *a, **k: (times, diffs)
+    monkeypatch.setattr("clipkit.softcuts.frame_change_series", lambda *a, **k: series)
+    monkeypatch.setattr("clipkit.softcuts._layout_changes_at", lambda *a, **k: True)
+    cuts = detect_soft_cuts(
+        Path("/tmp/source.mp4"), hard_cuts=[], duration=10.0, width=1920, height=1080
     )
+    assert cuts == []
+
+
+def test_detect_soft_cuts_skips_candidate_next_to_hard_cut(monkeypatch):
+    series = _synthetic_series()
+    monkeypatch.setattr("clipkit.softcuts._has_opencv", lambda: True)
+    monkeypatch.setattr("clipkit.softcuts.frame_change_series", lambda *a, **k: series)
     monkeypatch.setattr("clipkit.softcuts._layout_changes_at", lambda *a, **k: True)
     cuts = detect_soft_cuts(
         Path("/tmp/source.mp4"), hard_cuts=[2.5], duration=10.0, width=1920, height=1080

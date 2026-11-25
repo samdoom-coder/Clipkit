@@ -3,12 +3,15 @@
 ## Unreleased — 0.6 work
 
 - **Soft-cut detection:** a low-resolution frame-difference pass finds bounded
-  dissolves/fades (0.25–1.6 s) that the hard-cut detector misses. Candidates are
-  confirmed against face-layout changes (count, centre, size) so a lighting
-  change, flash, or camera bump does not fragment a normal shot. Confirmed
-  cuts land in `features.json` as `soft_cuts` and feed per-shot layout and
-  track-gallery resets alongside `scene_changes`. Confirmation requires the
-  `faces` extra; without OpenCV, soft cuts are skipped and hard cuts still work.
+  dissolves/fades (0.25–1.6 s) that the hard-cut detector misses. Candidates
+  must survive two checks: the frame one second after must differ from the
+  frame one second before (a gesture or camera bump returns to the same
+  composition), and the face layout must change (count, centre, size). The
+  persistent-change check cut a real 16-minute TEDx talk from 48 candidate
+  confirmations to 12 real camera cuts. Confirmed cuts land in `features.json`
+  as `soft_cuts` and feed per-shot layout and track-gallery resets alongside
+  `scene_changes`. Confirmation requires the `faces` extra; without OpenCV,
+  soft cuts are skipped and hard cuts still work.
 - **Identity-aware split pairing:** `eligible[:2]` is gone. Tracks are
   deduplicated by median position and appearance before pairing, and every
   combination is scored by `separation × pair_coverage × min(prominence)` behind
@@ -17,7 +20,7 @@
 - **Repo hygiene:** `examples/demo.sh` and `evals/run_seed.sh` are executable
   again (so `make demo` works), and the README clone URL is no longer a
   placeholder.
-- Tests: 112 pass, 1 skipped; `ruff` clean.
+- Tests: 115 pass, 1 skipped; `ruff` clean.
 
 ## 0.5.0 — per-shot layout and two-pass loudness
 
