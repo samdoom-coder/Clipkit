@@ -182,7 +182,7 @@ def clipkit_analyze(
     This is deterministic: no LLM is called. It returns candidates with a
     transparent 0-100 score broken into hook, standalone, pacing, emotion, and
     payoff. Read the text before choosing; do not blindly take rank 1.
-    scenes defaults on; pass false to skip hard-cut detection on very long sources.
+    scenes defaults on; pass false to skip hard- and soft-cut detection on very long sources.
     """
     ws = _ws(workspace)
     transcript = ensure_transcript(ws, backend="auto")

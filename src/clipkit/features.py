@@ -5,6 +5,7 @@ from pathlib import Path
 
 from clipkit.media import detect_scene_changes, read_wav
 from clipkit.models import Features, FeatureSeries, MediaInfo, Transcript
+from clipkit.softcuts import detect_soft_cuts
 from clipkit.vad import compute_rms, detect_speech_regions, silent_ratio
 
 
@@ -30,14 +31,23 @@ def compute_features(
     words_per_second = [round(count / 1.0, 3) for count in buckets]
 
     scene_changes: list[float] = []
+    soft_cuts: list[float] = []
     if scenes:
         scene_changes = detect_scene_changes(Path(media.path))
+        soft_cuts = detect_soft_cuts(
+            Path(media.path),
+            hard_cuts=scene_changes,
+            duration=duration,
+            width=media.width,
+            height=media.height,
+        )
 
     return Features(
         duration=round(duration, 3),
         audio=FeatureSeries(hop=hop, rms=[round(value, 6) for value in rms]),
         speech_regions=regions,
         scene_changes=scene_changes,
+        soft_cuts=soft_cuts,
         words_per_second=words_per_second,
         wps_hop=1.0,
         mean_rms=round(sum(rms) / len(rms), 6) if rms else 0.0,

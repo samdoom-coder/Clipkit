@@ -1,8 +1,10 @@
 # clipkit — next phase plan (0.6)
 
 **Status:** 0.5.0 shipped per-shot layout, two-pass loudness, per-clip hooks,
-and the split-screen co-visibility guard. `main` is six commits ahead of
-`origin` and the user will push; do not rewrite history. Tag `v0.5.0`.
+and the split-screen co-visibility guard. The first two 0.6 P0s are implemented
+on `main` and unreleased: bounded soft-cut detection with face-layout
+confirmation, and identity-aware split-pair selection with track dedupe. Both
+need real-video validation before a release tag.
 
 The core pipeline has four real-video validations: the FO588 podcast, a TEDx
 talk, a cut-heavy two-speaker film excerpt, and a 16:9 crop→split→crop
@@ -10,13 +12,14 @@ composite. See `docs/real-video-test-0.5.md` for the last two.
 
 ## 0.6 next-session checklist (read this first)
 
-Run `python -m pytest -q` (94 pass) and `ruff check src tests evals` before
-changing anything. Then pick the next item in priority order:
+Run `python -m pytest -q` (112 pass, 1 skipped) and
+`ruff check src tests evals` before changing anything. Then pick the next item
+in priority order:
 
-1. **Soft-cut detection (P0).** Hard cuts only today; a dissolve can merge two
-   layouts into one shot. Extend §1.
-2. **Split-pair selection and track dedupe (P0).** `eligible[:2]` is still
-   prominence-only; 3+ faces and duplicate tracks can pick the wrong pair. §2.
+1. ~~**Soft-cut detection (P0).**~~ Shipped in the unreleased 0.6 work. See §1
+   for the implementation and the real-video validation still owed.
+2. ~~**Split-pair selection and track dedupe (P0).**~~ Shipped in the unreleased
+   0.6 work. See §2.
 3. **True active speaker / diarization (P1).** 0.5.0 is conservative (blur or
    center crop when multiple separated faces cannot split); it no longer crops
    a listener by accident, but it does not follow the speaker. §3.
@@ -27,8 +30,8 @@ changing anything. Then pick the next item in priority order:
    points; rank is a shortlist, not a verdict. §7.
 
 Known limits to state honestly in release notes: true ASD is not implemented;
-soft cuts are not detected; captions do not move per layout; split-pair
-selection is prominence-based; score calibration is basic.
+soft cuts need OpenCV and a real-video validation pass; captions do not move per
+layout; score calibration is basic.
 
 This file is the working plan for 0.6. It is intentionally concrete: each item
 has a user problem, an implementation sketch, acceptance criteria, and tests.
@@ -101,7 +104,8 @@ rendered with the existing crop/split/blur renderer, the segments are
 concatenated, and one final pass burns the global ASS, muxes source audio, and
 runs two-pass loudnorm. The sidecar is `clips/clip_00N.reframe.json` with
 `layout: "per-shot"` and a `shots` array. The sketch below is retained for the
-remaining work (soft cuts, per-layout captions, a single graph).
+remaining work (per-layout captions, a single graph); soft cuts are covered in
+the subsection after it.
 
 ### Implementation sketch
 
@@ -137,42 +141,56 @@ remaining work (soft cuts, per-layout captions, a single graph).
   output, correct duration, and two panels in the middle.
 - Real smoke: FO588 538–584s must match the manual 0.4.1 dynamic edit.
 
-### What remains: soft cuts (P0)
+### Shipped: soft cuts (P0)
 
-The detector is hard-cut only (`scene` score ≥0.25). A slow dissolve or fade can
-join two layouts inside one shot and leave a panel on the wrong person.
+The original detector was hard-cut only (`scene` score ≥0.25), so a slow
+dissolve could join two layouts inside one shot and leave a panel on the wrong
+person.
 
-Plan:
+Implementation (unreleased 0.6):
 
-- Run a second, lower scene pass (0.15) and confirm candidate cuts over a 0.5s
-  window using face-count or layout-change signals; merge false positives.
-- Store confirmed cuts as `soft_cuts` in `features.json` (separate from hard
-  cuts) and let `_shot_boundaries` use both.
-- Keep hard cuts as the default; soft cuts must not fragment a steady shot.
+- `softcuts.py` streams downscaled grayscale frames at 8 fps and looks for a
+  *bounded* run of frame change: 0.25–1.6 s, with quiet frames on both sides.
+  Isolated spikes (hard cuts/flashes) and sustained motion (pans/zooms) are
+  rejected. A fixed low-threshold scene pass was not enough on its own: a 1 s
+  `xfade` test produced no hits even at 0.08.
+- Candidate runs within 0.5 s of a hard cut are ignored. Every other candidate
+  is confirmed by sampling faces one second either side and requiring a layout
+  change (face count, centre shift ≥15% of width, or face-height ratio ≥1.5).
+  Without OpenCV, soft cuts are skipped rather than guessed at.
+- Confirmed times are stored as `soft_cuts` in `features.json`; `render` merges
+  them with `scene_changes` for per-shot boundaries and track-gallery resets.
+  The features cache key includes a soft-cut version.
 
 **Acceptance:** a single→two-shot dissolve produces two layouts, with no
 mid-dissolve panel; a normal talking-head clip has no extra segments.
+**Still owed:** validate on the 16:9 composite and a real dissolve before a
+0.6 release; synthetic `xfade` coverage lives in `tests/test_softcuts.py`.
 
 ---
 
-## 2. Split-pair selection and track dedupe (P0)
+## 2. Split-pair selection and track dedupe (shipped, P0)
 
-**Problem:** `eligible[:2]` by prominence is still the pair policy. On the 0.4.5
+**Problem:** `eligible[:2]` by prominence was the pair policy. On the 0.4.5
 film test, a 3-face shot picked the two most prominent men while a third face sat
-far left; on the 16:9 composite the chosen pair was plausible, but the logic is
-not identity-aware. Duplicate tracks of one person can still win.
+far left; duplicate tracks of one person could win.
 
-**Plan:**
+**Shipped in the unreleased 0.6 work:**
 
-- Deduplicate tracks by median x proximity, appearance-descriptor similarity, and
-  temporal overlap before choosing the pair.
-- Choose the pair with the best score:
+- `_dedupe_tracks` collapses tracker fragments by median position and mean
+  appearance descriptor; tracks without descriptors only collapse when they are
+  very close (≤10% of width).
+- `_select_split_pair` scores every combination, not just the top two:
   `separation / width * pair_coverage * min(prominence)`, subject to the 70%
-  co-visibility, 2s overlap, and 18% separation gates.
-- Require different identities: descriptor similarity below a threshold.
-- If no valid pair, keep the 0.5.0 fallback (blur on 16:9, crop on ultra-wide)
-  and record the reason.
-- Add a `--pair left,right` / MCP `panel_pair` override for manual correction.
+  co-visibility, 2 s overlap, and 18% separation gates.
+- Pairs that still look like one identity are skipped. If no valid pair exists,
+  the 0.5.0 fallback (blur on 16:9, crop on ultra-wide) stays, with a diagnostic
+  note (separation, coverage, or duration).
+- `ReframePlan` now records `pair_track_ids` and `pair_score`.
+
+**Still open:** the `--pair left,right` / MCP `panel_pair` manual override, and
+the FO588 real-video check that the pair is Raj + Vinh rather than two Vinh
+tracks.
 
 **Acceptance:** on the FO588 two-shot, the pair is always Raj + Vinh, never two
 Vinh tracks; the sidecar records both track IDs and the score.
@@ -310,10 +328,11 @@ Still open:
 
 ## 10. Definition of done for 0.6
 
-- A soft cut between a single and a two-shot produces two layouts without a
-  mid-dissolve panel.
-- Split-pair selection is identity-aware; duplicate tracks of one person never
-  fill both panels; the sidecar records both track IDs and the score.
+- [x] A soft cut between a single and a two-shot produces two layouts without a
+  mid-dissolve panel (synthetic coverage; real-video check still owed).
+- [x] Split-pair selection is identity-aware; duplicate tracks of one person
+  never fill both panels; the sidecar records both track IDs and the score
+  (unit coverage; FO588 check still owed).
 - The crop follows the active speaker on ≥90% of speech frames in a real
   two-person interview, with the 0.5.0 fallback for low confidence.
 - Captions remain legible in crop and split shots without jumping mid-sentence.

@@ -5,6 +5,7 @@ import os
 import statistics
 import subprocess
 from dataclasses import dataclass, field
+from itertools import combinations
 from pathlib import Path
 from typing import Literal
 
@@ -118,6 +119,10 @@ class ReframePlan(BaseModel):
     panel_paths: list[list[list[float]]] = Field(default_factory=list)
     crop_path: list[list[float]] = Field(default_factory=list)
     tracks: list[TrackSummary] = Field(default_factory=list)
+    # Split-screen audit trail: which two identities won, and the pair score
+    # (separation x co-visibility x the weaker track's prominence).
+    pair_track_ids: list[int] = Field(default_factory=list)
+    pair_score: float | None = None
     notes: list[str] = Field(default_factory=list)
 
     @property
@@ -717,6 +722,155 @@ def _panel_box(center_x: float, center_y: float, width: int, height: int) -> lis
     return [int(x), int(y), int(w), int(h)]
 
 
+def _track_descriptor(track: Track) -> np.ndarray | None:
+    vectors = [box.descriptor for _, box in track.boxes if box.descriptor is not None]
+    if not vectors:
+        return None
+    mean = np.mean(np.stack(vectors), axis=0)
+    norm = float(np.linalg.norm(mean))
+    return mean / norm if norm > 1e-6 else None
+
+
+def _appearance_similarity(left: Track, right: Track) -> float | None:
+    left_descriptor = _track_descriptor(left)
+    right_descriptor = _track_descriptor(right)
+    if (
+        left_descriptor is None
+        or right_descriptor is None
+        or left_descriptor.shape != right_descriptor.shape
+    ):
+        return None
+    return float(np.dot(left_descriptor, right_descriptor))
+
+
+def _same_identity(
+    left: Track, right: Track, *, frame_width: int, frame_height: int
+) -> bool:
+    """Cheap duplicate-track test, not face recognition.
+
+    Tracker fragments of one person are close in the frame; appearance only
+    makes the test more confident when descriptors exist. A wide spatial gate
+    is deliberately not applied without descriptors: two different people can
+    sit far apart, and merging them would remove a valid split pair.
+    """
+    dx = abs(left.median_x() - right.median_x())
+    dy = abs(left.median_y() - right.median_y())
+    if dx > 0.22 * max(1, frame_width) or dy > 0.25 * max(1, frame_height):
+        return False
+    similarity = _appearance_similarity(left, right)
+    if similarity is not None:
+        return similarity >= 0.72
+    return dx <= 0.10 * max(1, frame_width) and dy <= 0.12 * max(1, frame_height)
+
+
+def _dedupe_tracks(
+    tracks: list[Track], *, frame_width: int, frame_height: int
+) -> list[Track]:
+    kept: list[Track] = []
+    for track in sorted(tracks, key=lambda item: item.prominence, reverse=True):
+        if any(
+            _same_identity(track, other, frame_width=frame_width, frame_height=frame_height)
+            for other in kept
+        ):
+            continue
+        kept.append(track)
+    return kept
+
+
+@dataclass(frozen=True)
+class _PairStats:
+    left: Track
+    right: Track
+    separation: float
+    shared_seconds: float
+    coverage: float
+    score: float
+
+
+def _pair_stats(
+    left: Track,
+    right: Track,
+    *,
+    duration: float,
+    sample_fps: float,
+    frame_width: int,
+) -> _PairStats:
+    left_times = {round(at, 3) for at, _ in left.boxes}
+    right_times = {round(at, 3) for at, _ in right.boxes}
+    shared_seconds = len(left_times & right_times) / max(1e-6, sample_fps)
+    coverage = min(1.0, shared_seconds / duration) if duration > 0 else 0.0
+    separation = abs(left.median_x() - right.median_x())
+    score = (
+        (separation / max(1, frame_width))
+        * coverage
+        * min(left.prominence, right.prominence)
+    )
+    return _PairStats(
+        left=left,
+        right=right,
+        separation=separation,
+        shared_seconds=shared_seconds,
+        coverage=coverage,
+        score=score,
+    )
+
+
+def _select_split_pair(
+    tracks: list[Track],
+    *,
+    duration: float,
+    sample_fps: float,
+    frame_width: int,
+    frame_height: int,
+    min_split_duration: float,
+    min_pair_coverage: float,
+) -> tuple[_PairStats | None, _PairStats | None]:
+    """Return (best valid pair, best diagnostic pair).
+
+    Every combination is scored, not just the two most prominent tracks: a
+    high-prominence listener who shares the frame briefly should not beat a
+    slightly less prominent pair that is co-visible for the whole clip.
+    """
+    best: _PairStats | None = None
+    diagnostic: _PairStats | None = None
+    for left, right in combinations(tracks, 2):
+        if _same_identity(left, right, frame_width=frame_width, frame_height=frame_height):
+            continue
+        stats = _pair_stats(
+            left,
+            right,
+            duration=duration,
+            sample_fps=sample_fps,
+            frame_width=frame_width,
+        )
+        if diagnostic is None or (stats.coverage, stats.separation) > (
+            diagnostic.coverage,
+            diagnostic.separation,
+        ):
+            diagnostic = stats
+        if (
+            stats.separation < 0.18 * max(1, frame_width)
+            or stats.shared_seconds < min_split_duration
+            or stats.coverage < min_pair_coverage
+        ):
+            continue
+        if best is None or stats.score > best.score:
+            best = stats
+    return best, diagnostic
+
+
+def _describe_missing_pair(
+    stats: _PairStats | None, *, frame_width: int, min_pair_coverage: float
+) -> str:
+    if stats is None:
+        return "multiple faces detected but no separable pair for split-screen"
+    if stats.separation < 0.18 * max(1, frame_width):
+        return "multiple faces detected but not enough co-temporal separation for split-screen"
+    if stats.coverage < min_pair_coverage:
+        return f"two faces share the frame for {stats.coverage:.0%} of the clip; single crop"
+    return f"two faces persist together for only {stats.shared_seconds:.1f}s; single crop"
+
+
 def plan_reframe(
     video: Path,
     *,
@@ -786,18 +940,22 @@ def plan_reframe(
     split_note: str | None = None
 
     if layout in ("auto", "split") and len(eligible) >= 2:
-        pair = eligible[:2]
-        left, right = sorted(pair, key=lambda track: track.median_x())
-        separation = abs(left.median_x() - right.median_x())
-        left_times = {round(at, 3) for at, _ in left.boxes}
-        right_times = {round(at, 3) for at, _ in right.boxes}
-        shared_seconds = len(left_times & right_times) / max(1e-6, sample_fps)
-        pair_coverage = shared_seconds / duration if duration > 0 else 0.0
-        if (
-            separation >= 0.18 * max(1, info.width)
-            and shared_seconds >= min_split_duration
-            and pair_coverage >= min_pair_coverage
-        ):
+        pair_pool = _dedupe_tracks(
+            eligible, frame_width=info.width, frame_height=info.height
+        )
+        pair, diagnostic = _select_split_pair(
+            pair_pool,
+            duration=duration,
+            sample_fps=sample_fps,
+            frame_width=info.width,
+            frame_height=info.height,
+            min_split_duration=min_split_duration,
+            min_pair_coverage=min_pair_coverage,
+        )
+        if pair is not None:
+            left, right = sorted(
+                (pair.left, pair.right), key=lambda track: track.median_x()
+            )
             panels = [
                 _panel_box(left.median_x(), left.median_y(), info.width, info.height),
                 _panel_box(right.median_x(), right.median_y(), info.width, info.height),
@@ -822,26 +980,47 @@ def plan_reframe(
                     scene_changes=scene_changes,
                 ),
             ]
+            notes = [
+                (
+                    f"{len(eligible)} persistent faces; selected tracks "
+                    f"{left.id}+{right.id}"
+                    if len(eligible) > 2
+                    else "2 persistent face tracks"
+                )
+            ]
+            if len(pair_pool) < len(eligible):
+                notes.append(
+                    f"merged {len(eligible) - len(pair_pool)} duplicate track(s) "
+                    "before pair selection"
+                )
+            notes.extend(
+                [
+                    f"horizontal separation {pair.separation:.0f}px",
+                    f"pair co-visible {pair.coverage:.0%} of the clip",
+                    f"pair score {pair.score:.0f}",
+                    "two-panel split-screen with tracked panels",
+                ]
+            )
             return ReframePlan(
                 layout="split",
                 panel_boxes=panels,
                 panel_paths=panel_paths,
                 tracks=summaries,
-                notes=[
-                    (
-                        f"{len(eligible)} persistent faces; showing top 2 by prominence"
-                        if len(eligible) > 2
-                        else "2 persistent face tracks"
-                    ),
-                    f"horizontal separation {separation:.0f}px",
-                    f"pair co-visible {pair_coverage:.0%} of the clip",
-                    "two-panel split-screen with tracked panels",
-                ],
+                pair_track_ids=[left.id, right.id],
+                pair_score=round(pair.score, 3),
+                notes=notes,
             )
-        if separation < 0.18 * max(1, info.width):
-            split_note = "multiple faces detected but not enough co-temporal separation for split-screen"
+        if len(pair_pool) < 2:
+            split_note = (
+                "multiple faces detected but they resolve to one identity after "
+                "dedupe; single crop"
+            )
         else:
-            split_note = f"two faces share the frame for {pair_coverage:.0%} of the clip; single crop"
+            split_note = _describe_missing_pair(
+                diagnostic,
+                frame_width=info.width,
+                min_pair_coverage=min_pair_coverage,
+            )
 
     # Persistence, not split eligibility, is the right pool for a single crop:
     # a speaker can produce a separate sub-25%-coverage track per camera angle.

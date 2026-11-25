@@ -123,6 +123,10 @@ class Features(BaseModel):
     audio: FeatureSeries = Field(default_factory=FeatureSeries)
     speech_regions: list[list[float]] = Field(default_factory=list)
     scene_changes: list[float] = Field(default_factory=list)
+    # Confirmed dissolves/fades, separate from hard cuts. Both feed shot
+    # boundaries and face-track gallery resets; keeping them separate keeps the
+    # reason for each boundary inspectable.
+    soft_cuts: list[float] = Field(default_factory=list)
     words_per_second: list[float] = Field(default_factory=list)
     wps_hop: float = 1.0
     mean_rms: float = 0.0

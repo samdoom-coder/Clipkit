@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — 0.6 work
+
+- **Soft-cut detection:** a low-resolution frame-difference pass finds bounded
+  dissolves/fades (0.25–1.6 s) that the hard-cut detector misses. Candidates are
+  confirmed against face-layout changes (count, centre, size) so a lighting
+  change, flash, or camera bump does not fragment a normal shot. Confirmed
+  cuts land in `features.json` as `soft_cuts` and feed per-shot layout and
+  track-gallery resets alongside `scene_changes`. Confirmation requires the
+  `faces` extra; without OpenCV, soft cuts are skipped and hard cuts still work.
+- **Identity-aware split pairing:** `eligible[:2]` is gone. Tracks are
+  deduplicated by median position and appearance before pairing, and every
+  combination is scored by `separation × pair_coverage × min(prominence)` behind
+  the existing 70% co-visibility, 2 s overlap, and 18% separation gates. The
+  reframe sidecar records `pair_track_ids` and `pair_score`.
+- **Repo hygiene:** `examples/demo.sh` and `evals/run_seed.sh` are executable
+  again (so `make demo` works), and the README clone URL is no longer a
+  placeholder.
+- Tests: 112 pass, 1 skipped; `ruff` clean.
+
 ## 0.5.0 — per-shot layout and two-pass loudness
 
 - **Per-shot layout:** with `--layout auto`, clipkit now plans crop / split /

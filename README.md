@@ -5,6 +5,7 @@
 **Open, agent-native clip studio.** Turn long videos into captioned vertical shorts — locally, with your own AI agent doing the editorial thinking.
 
 **v0.5.0** — per-shot layout, two-pass loudness, per-clip hooks, and split-screen quality guards.
+Unreleased 0.6 work on `main`: soft-cut detection and identity-aware split pairing.
 
 ```bash
 clipkit init podcast.mp4
@@ -35,8 +36,8 @@ OpusClip-style tools are black boxes: you upload your video, pay per minute, and
 Requires Python 3.10+ and **FFmpeg on PATH**.
 
 ```bash
-git clone https://github.com/your-org/clipkit
-cd clipkit
+git clone https://github.com/samdoom-coder/Clipkit.git
+cd Clipkit
 python -m pip install -e ".[mcp]"
 
 # optional: local ASR
@@ -109,15 +110,21 @@ clipkit auto interview.mp4 -w demo.clipkit --top 3
 Tracking uses **YuNet** (bundled, MIT) with a Haar fallback, Kalman-predicted
 boxes, and ByteTrack-style high/low-confidence association. A cheap appearance
 descriptor re-identifies a track through short occlusions; scene cuts clear the
-gallery. Hard-cut detection runs by default during `analyze`/`auto`; pass
-`--no-scenes` to skip it on very long sources. Faces smaller than 3.5% of the
-frame height are ignored, and per-shot tracks for one speaker are merged into a
-single largest-face path so cut-heavy stage footage stays on the speaker. If the
-merged path covers less than 20% of the clip, the renderer falls back to a
-static crop instead of following a fragmented track. Split panels are tracked
-independently with their own `sendcmd` crop paths; each panel is a 9:16 crop
-scaled over a blurred fill. With 3+ persistent faces, the top two by prominence
-(screen time × face size) get the split.
+gallery. Hard cuts use FFmpeg's scene score; a second low-resolution pass finds
+bounded dissolves/fades and confirms them against face-layout changes before
+splitting a shot. Both run by default during `analyze`/`auto`; pass
+`--no-scenes` to skip them on very long sources. Soft-cut confirmation needs the
+optional `faces` extra (OpenCV); without it, only hard cuts are used. Faces
+smaller than 3.5% of the frame height are ignored, and per-shot tracks for one
+speaker are merged into a single largest-face path so cut-heavy stage footage
+stays on the speaker. If the merged path covers less than 20% of the clip, the
+renderer falls back to a static crop instead of following a fragmented track.
+Split panels are tracked independently with their own `sendcmd` crop paths; each
+panel is a 9:16 crop scaled over a blurred fill. Tracks are deduplicated by
+position and appearance before pairing, and every candidate pair is scored by
+separation × co-visibility × the weaker track's prominence. With 3+ persistent
+faces, that score picks the split rather than simply the two largest tracks;
+the sidecar records both track IDs and the score.
 
 Split-screen is a whole-clip decision when `--no-per-shot` is used, so the
 chosen pair must be co-visible for at least 70% of the clip (plus 2s of overlap
@@ -304,9 +311,9 @@ separate alignment model. On CPU, `--ctc-align` is noticeably slower because the
 CTC head projects every encoder frame across a 99k-token vocabulary.
 
 Known v1 limits: no speaker diarization; re-ID handles short occlusions via a
-cheap appearance descriptor, not long absences or re-entry; 3+ faces show the
-top two by prominence, with no manual speaker picker; no B-roll/emoji/SFX. See
-the roadmap.
+cheap appearance descriptor, not long absences or re-entry; 3+ faces use
+identity-deduped, scored pair selection with no manual speaker picker; no
+B-roll/emoji/SFX. See the roadmap.
 
 ## Evaluate the rubric
 
@@ -332,12 +339,13 @@ Working v1:
 - [x] resumable workspace + stage cache
 - [x] Rumble-2-Flash, faster-whisper, and existing-transcript backends
 - [x] CTC forced alignment + proportional fallback
-- [x] energy VAD, audio features, hard-cut detection (default on)
+- [x] energy VAD, audio features, hard + soft cut detection (default on)
+- [x] bounded dissolve/fade detection confirmed by face-layout change
 - [x] deterministic candidate generation + transparent scoring
 - [x] YuNet face detection (MIT, bundled) + Haar fallback
 - [x] Kalman-predicted, ByteTrack-style tracking with smoothed crop paths
 - [x] auto per-shot crop/split/blur with 70% split co-visibility guard
-- [x] appearance re-ID through short occlusion; 3+ face prominence policy
+- [x] appearance re-ID through short occlusion; identity-aware split pairing
 - [x] dynamic split panels, face-aware center crop, auditable reframe plans
 - [x] ASS karaoke captions, brand style JSON
 - [x] hook banner (`--hook-text`, `--hook-from-title`, `--hooks` per clip, styleable)
@@ -345,7 +353,7 @@ Working v1:
 - [x] 1080×1920 render with two-pass loudness normalization
 - [x] CLI + 10-tool MCP server + agent skill
 - [x] contact-sheet inspection; eval CLI + seed regression set
-- [x] 94 tests, including an ffmpeg end-to-end test
+- [x] 112 tests, including an ffmpeg end-to-end test
 - [x] GitHub Actions CI (`ruff` + `pytest`) on every push/PR
 
 Next:

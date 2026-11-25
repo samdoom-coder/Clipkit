@@ -11,9 +11,9 @@
 | Repo root | `/content/clipkit` |
 | Python | 3.10+ (validated on 3.13.16) |
 | Core dependency | FFmpeg + ffprobe on `PATH` |
-| Status | Working local MVP; 94 tests passing; CI on every push/PR |
-| Release | 0.5.0; local `main` is 6 commits ahead of `origin`, tag `v0.5.0`, push pending |
-| Next work | `FUTURE.md` §0.6 checklist (soft cuts, split-pair identity, true ASD, captions) |
+| Status | Working local MVP; 112 tests passing; CI on every push/PR |
+| Release | 0.5.0 tagged; 0.6 work in progress on `main` (soft cuts, split-pair identity) |
+| Next work | `FUTURE.md` §0.6 checklist (true ASD, per-layout captions, overlays, eval) |
 
 ---
 
@@ -48,7 +48,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Resumable workspace with per-stage content-hash caching.
 - Rumble-2-Flash ASR (validated on an NVIDIA T4), faster-whisper fallback, existing-transcript backend.
 - CTC word alignment from Rumble’s auxiliary CTC head, with graceful proportional fallback.
-- Energy VAD, audio RMS features, words-per-second, optional scene cuts.
+- Energy VAD, audio RMS features, words-per-second, optional hard + soft cut detection.
 - Deterministic candidate windows + transparent scoring:
   - hook 35%
   - standalone 25%
@@ -68,8 +68,9 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
   - static median face crop for `--reframe face`.
 - Auto split-screen for two persistent, horizontally separated speakers with
   co-temporal overlap and `--min-split` hysteresis.
-- 3+ face policy: top two by prominence (screen time × face size), with the
-  rest ignored; a note records the decision.
+- 3+ face policy: tracks are deduplicated by position and appearance, then
+  every pair is scored by separation × co-visibility × the weaker track's
+  prominence; the sidecar records the winning track IDs and score.
 - Dynamic split panels: each panel gets its own tracked `sendcmd` crop path.
 - Auditable reframe sidecar: `clips/clip_00N.reframe.json` with tracks, panels,
   panel paths, crop path, layout decision, and notes.
@@ -80,14 +81,17 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 - Two-pass loudness normalization (targets `loudnorm -14 LUFS`) and faststart.
 - Hook banner (top-of-frame, styleable, `--hook-text` / `--hook-from-title`
   / `--hooks hooks.json` for a different hook per clip).
-- Split-screen coverage guard (pair co-visible for 70% of the clip) and
-  default-on hard-cut detection (threshold 0.25).
+- Split-screen coverage guard (pair co-visible for 70% of the clip),
+  identity-aware pair scoring, and default-on hard-cut detection (threshold
+  0.25) plus confirmed soft cuts (dissolves/fades).
+- Soft-cut confirmation uses the face layout one second either side of a
+  candidate and requires OpenCV; without the `faces` extra, only hard cuts run.
 - Containment-aware candidate dedupe + content-word diversity pass.
 - CLI with 13 subcommands, 10-tool MCP server, bundled skill, eval harness.
 - Contact-sheet inspection for visual QA.
 - Blur and split fills are heavily blurred and darkened so a 16:9 close-up
   cannot leave a recognisable half-face beside a 9:16 panel/foreground.
-- Dockerfile, Makefile, examples, synthetic demo, 94 tests, GitHub Actions CI.
+- Dockerfile, Makefile, examples, synthetic demo, 112 tests, GitHub Actions CI.
 - 0.4.1 was validated on a real 10-minute FO588 episode at 1920×1080; see
   `docs/real-video-test-fo588.md` and `FUTURE.md`. 0.4.3 added a TEDx talk
   (single speaker, 16 min), 0.4.5 added a cut-heavy two-speaker film excerpt
@@ -118,7 +122,7 @@ The moat is **clip selection + evaluation**, not plumbing FFmpeg. Generic FFmpeg
 ```bash
 cd /content/clipkit
 python -m pip install -e ".[dev,mcp]"
-python -m pytest -q                    # 94 pass
+python -m pytest -q                    # 112 pass, 1 skipped
 ruff check src tests evals             # clean
 clipkit doctor
 make demo                              # synthetic video, no model/GPU needed
@@ -208,12 +212,13 @@ The workspace is the database. No Postgres, Redis, or server is required for loc
 | `src/clipkit/captions.py` | ASS builder, caption + hook-banner style, bundled font copy |
 | `src/clipkit/reframe.py` | YuNet/Haar detection, Kalman tracking, crop-path planner, split layout |
 | `src/clipkit/features.py` | RMS/VAD/WPS/scene feature aggregation |
+| `src/clipkit/softcuts.py` | Bounded dissolve/fade detection + face-layout confirmation |
 | `src/clipkit/evaluation.py` | precision@k / coverage-recall metrics |
 | `src/clipkit/doctor.py` | Toolchain report |
 | `src/clipkit/skill.py` | Locate/install SKILL.md |
 | `src/clipkit/assets/fonts/` | Montserrat ExtraBold + OFL license |
 | `src/clipkit/assets/models/` | YuNet ONNX + MIT license |
-| `tests/` | 94 tests, including FFmpeg split/dynamic-crop end-to-end tests |
+| `tests/` | 112 tests, including FFmpeg split/dynamic-crop end-to-end tests |
 | `evals/` | Labeling protocol, metrics, harness |
 | `examples/` | Demo script, MCP config, caption style |
 | `Dockerfile`, `Makefile` | Reproducible install/test/demo |
@@ -230,7 +235,7 @@ demo.clipkit/
 ├── media.json            # MediaInfo from ffprobe
 ├── audio.wav             # 16 kHz mono PCM
 ├── transcript.json       # segments + word-level timings
-├── features.json         # RMS series, speech regions, WPS, scene cuts
+├── features.json         # RMS series, speech regions, WPS, hard + soft cuts
 ├── candidates.json       # ranked Candidate objects
 ├── clips/
 │   ├── clip_001.mp4
@@ -397,11 +402,12 @@ back-references, very slow/fast pacing, >55s, <18s.
   until 3 hits.
 - Re-ID: a track missing for 0.8s moves to a lost gallery for up to 5s. A new
   detection re-attaches if a normalized 32×32 grayscale + hue descriptor clears
-  `reid_threshold` and a spatial gate. Scene cuts clear active and lost tracks,
-  so identities never leak across shots. This is short-occlusion re-ID, not face
-  recognition.
-- 3+ faces: the top two by `prominence = hits × median face area` get the split;
-  the note records that choice. If the pair is wrong, force a single crop.
+  `reid_threshold` and a spatial gate. Hard and soft cuts clear active and lost
+  tracks, so identities never leak across shots. This is short-occlusion re-ID,
+  not face recognition.
+- 3+ faces: tracks are deduped by position/appearance, then every pair is scored
+  by separation × co-visibility × `min(prominence)`; the note and sidecar record
+  the winning track IDs and score. If the pair is wrong, force a single crop.
 - Single crop: `build_crop_path` uses EMA (`alpha=0.3`), a 4%-of-width deadzone,
   clamps to the crop range, and resets on scene cuts. `--reframe track` writes
   `clip_00N.crop.cmd` and renders with `sendcmd=f=...,crop=...`. `--reframe face`
@@ -488,7 +494,7 @@ labels.
 ## 11. Testing and verification
 
 ```bash
-python -m pytest -q        # 94 pass
+python -m pytest -q        # 112 pass, 1 skipped
 ruff check src tests evals # clean
 ```
 
@@ -500,9 +506,13 @@ Coverage highlights:
 - `test_media.py`: crop geometry (1920×1080 → 608×1080 at x=656) and the
   dark blur/split fill regression.
 - `test_reframe.py`: Kalman/IoU association, two-track split, one-face single,
-  sequential-speaker non-split, 3+ prominence policy, re-ID through occlusion,
-  appearance mismatch, scene-cut gallery clear, hysteresis, scene-cut jump,
-  clamped crop path, empty scene, YuNet coordinate mapping.
+  sequential-speaker non-split, 3+ face identity dedupe, every-pair scoring,
+  sidecar pair IDs/score, re-ID through occlusion, appearance mismatch,
+  scene-cut gallery clear, hysteresis, scene-cut jump, clamped crop path,
+  empty scene, YuNet coordinate mapping.
+- `test_softcuts.py`: bounded-run detection, isolated-spike and sustained-motion
+  rejection, face-layout signatures, confirmation gating, hard-cut proximity,
+  OpenCV-absent no-op, features wiring, and a synthetic `xfade` dissolve.
 - `test_pipeline_e2e.py`: generates a 24s video with FFmpeg, runs mock transcript
   → features → candidates → crop render → blur render → split render →
   dynamic split panels → sendcmd dynamic crop → contact sheet.
@@ -575,9 +585,11 @@ Real validation performed (not in CI):
     normalized 32×32 grayscale crop + hue histogram. It covers short occlusions
     (5s gallery) and clears at scene cuts. Similar outfits, long absences, or
     cuts will produce a new ID; do not present it as biometric identity.
-19. **3+ faces shows the top two by prominence**, not all speakers. `prominence`
-    is `hits × median face area`. If the pair is wrong, force a single crop or
-    pick a one-speaker candidate; there is no manual picker yet.
+19. **3+ faces picks the best-scoring co-visible pair**, after deduping tracks
+    by position/appearance. The score is separation × pair coverage ×
+    `min(prominence)`, where `prominence = hits × median face area`. If the pair
+    is wrong, force a single crop or pick a one-speaker candidate; there is no
+    manual picker yet.
 20. **Long YouTube videos are sign-in gated and often SABR-limited.** Stable
     `yt-dlp` may expose only the progressive 360p format. The 2026.11.19 dev
     build downloaded the 1080p `137+140` streams for the FO588 test. Adaptive
@@ -642,7 +654,7 @@ The detailed 0.5 plan, acceptance criteria, and the FO588 lessons live in
    one render (the 0.4.1 Lucas clip is currently three manual segments).
 2. **Long-term identity**: re-ID through long absences/re-entry, a manual
    speaker picker, and tuning Kalman `Q`/`R` for 4K. Short-occlusion re-ID and
-   the 3+ prominence policy are in place.
+   identity-aware split pairing are in place.
 3. **Diarization** (pyannote or a licensed alternative) + speaker-aware captions.
 4. **Real eval set**: 20–50 videos, blind human labels, precision@3 and
    coverage recall per commit. The harness exists; the data does not.

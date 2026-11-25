@@ -155,6 +155,8 @@ def ensure_features(
         "scenes": scenes,
         "hop": 0.5,
         "scene_threshold": DEFAULT_SCENE_THRESHOLD,
+        # Bump when the soft-cut detector changes so old features recompute.
+        "soft_cuts": 1,
     }
     destination = ws.root / "features.json"
     if not force and ws.stage_is_valid("features", params) and destination.exists():
@@ -539,11 +541,17 @@ def render_candidates(
 
             if needs_plan and options.layout != "blur":
                 try:
-                    cuts = [
+                    hard_cuts = [
                         round(at - candidate.start, 3)
                         for at in (features.scene_changes if features else [])
                         if candidate.start <= at <= candidate.end
                     ]
+                    soft_cuts = [
+                        round(at - candidate.start, 3)
+                        for at in (features.soft_cuts if features else [])
+                        if candidate.start <= at <= candidate.end
+                    ]
+                    cuts = sorted(set(hard_cuts) | set(soft_cuts))
                     if options.layout == "auto" and options.per_shot_layout and cuts:
                         decisions = plan_shot_layout(
                             ws.source_path, candidate, cuts, options, media

@@ -66,11 +66,11 @@ clipkit transcribe -w .clipkit --backend rumble --language English --ctc-align
 clipkit analyze -w .clipkit --min-seconds 20 --max-seconds 60 --top 12
 ```
 
-This computes audio energy, speech regions, words-per-second, optional scene
-cuts, and ranked candidate windows. It is deterministic and calls no LLM.
+This computes audio energy, speech regions, words-per-second, cut boundaries,
+and ranked candidate windows. It is deterministic and calls no LLM.
 
-Use `--scenes` only when you need hard-cut information (it is slower on long
-videos).
+Hard- and soft-cut detection runs by default. Pass `--no-scenes` on very long
+sources to skip both; per-shot layout then falls back to whole-clip planning.
 
 ### 4. Read the candidates like an editor
 
@@ -110,8 +110,9 @@ Options:
   flips to split-screen (hysteresis). Split-screen also needs the pair to be
   co-visible for at least 70% of the clip; otherwise a panel would hold a stale
   position across cuts.
-- `--no-scenes` — skip hard-cut detection. It runs by default and keeps track
-  IDs from leaking across shots; only disable it on very long sources.
+- `--no-scenes` — skip hard- and soft-cut detection. It runs by default and
+  keeps track IDs from leaking across shots; only disable it on very long
+  sources. Soft-cut confirmation needs the `faces` extra.
 - `--no-per-shot` — use one layout for the whole clip instead of deciding per
   shot. Per-shot layout is the default with `--layout auto`.
 - `--no-captions` — clean render.
@@ -308,7 +309,8 @@ loop. Do not optimize a single video against its labels.
 - **Split-screen flips or picks the wrong two people:** raise `--min-split 3`,
   or force `--layout crop` and pick a one-speaker candidate. Split requires two
   co-temporal, horizontally separated tracks. With 3+ persistent faces, clipkit
-  shows the top two by prominence; if that pair is wrong, force a single crop.
+  dedupes tracks and scores every pair; if the chosen pair is wrong, force a
+  single crop.
 - **Identity swaps after occlusion:** re-ID uses a cheap appearance descriptor
   and a spatial gate, and only covers short occlusions. Long absences, similar
   outfits, or a cut will create a new track; check `.reframe.json`.

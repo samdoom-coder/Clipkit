@@ -222,8 +222,76 @@ def test_plan_reframe_shows_top_two_of_three_plus_faces(monkeypatch):
         Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
     )
     assert plan.layout == "split"
-    assert "3 persistent faces; showing top 2 by prominence" in plan.notes[0]
+    assert "3 persistent faces" in plan.notes[0]
+    assert plan.pair_track_ids
+    assert plan.pair_score is not None
     assert len(plan.panel_boxes) == 2
+
+
+def test_plan_reframe_dedupes_tracks_of_the_same_person(monkeypatch):
+    samples = [
+        (i / 4.0, [_box(400), _box(430), _box(1500)]) for i in range(40)
+    ]
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "split"
+    assert plan.pair_track_ids == [0, 2]
+    assert any("duplicate track" in note for note in plan.notes)
+    left, right = plan.panel_boxes
+    assert left[0] < 700
+    assert right[0] > 1100
+
+
+def test_plan_reframe_uses_appearance_to_dedupe_fragments(monkeypatch):
+    same_person = _appearance(0)
+    other_person = _appearance(1)
+    samples = [
+        (
+            i / 4.0,
+            [
+                _box(400, descriptor=same_person),
+                _box(800, descriptor=same_person),
+                _box(1500, descriptor=other_person),
+            ],
+        )
+        for i in range(40)
+    ]
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "split"
+    assert plan.pair_track_ids == [0, 2]
+
+
+def test_plan_reframe_scores_all_pairs_not_just_top_two(monkeypatch):
+    samples = []
+    for i in range(40):
+        at = i / 4.0
+        boxes = [_box(300, size=200), _box(900, size=100)]
+        if at < 2.5:  # a prominent listener who only shares 25% of the clip
+            boxes.append(_box(1500, size=300))
+        samples.append((at, boxes))
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "split"
+    assert plan.pair_track_ids == [0, 1]
+    assert plan.pair_score is not None and plan.pair_score > 0
+    assert any("pair score" in note for note in plan.notes)
+
+
+def test_plan_reframe_reports_missing_separation(monkeypatch):
+    samples = [(i / 4.0, [_box(500), _box(700)]) for i in range(40)]
+    monkeypatch.setattr("clipkit.reframe.sample_faces", lambda *a, **k: samples)
+    plan = plan_reframe(
+        Path("/tmp/source.mp4"), start=0, duration=10, media=_media(), layout="auto"
+    )
+    assert plan.layout == "single"
+    assert any("not enough co-temporal separation" in note for note in plan.notes)
 
 
 def test_plan_reframe_does_not_split_sequential_speakers(monkeypatch):

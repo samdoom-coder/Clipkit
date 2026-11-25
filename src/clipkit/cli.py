@@ -514,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scenes",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="detect hard cuts (default: on; --no-scenes skips it on long videos)",
+        help="detect hard + soft cuts (default: on; --no-scenes skips both on long videos)",
     )
     p.add_argument("--force", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -581,7 +581,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scenes",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="detect hard cuts (default: on; --no-scenes skips it on long videos)",
+        help="detect hard + soft cuts (default: on; --no-scenes skips both on long videos)",
     )
     p.add_argument("--layout", default="crop", choices=["crop", "blur", "split", "auto"])
     p.add_argument("--reframe", default="center", choices=["center", "face", "track"])
